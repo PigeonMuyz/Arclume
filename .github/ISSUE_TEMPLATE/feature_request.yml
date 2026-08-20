@@ -1,0 +1,34 @@
+name: 功能建议
+description: 提议面向用户的功能、流程或可维护性改进
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 要解决的问题
+      description: 描述具体使用场景和当前阻碍，而非只描述实现方案。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 已考虑的替代方案
+  - type: dropdown
+    id: area
+    attributes:
+      label: 影响区域
+      options:
+        - 游戏库与发现
+        - 启动与运行时
+        - 更新与发布
+        - 界面与可访问性
+        - 文档与开发体验
+        - 其他

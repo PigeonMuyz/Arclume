@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/PigeonMuyz/Arclume/security/advisories/new
+    about: 请私下提交安全问题，不要在公开 Issue 中提供漏洞细节或敏感文件。
+  - name: 使用帮助与日志隐私
+    url: https://github.com/PigeonMuyz/Arclume/blob/main/SUPPORT.md
+    about: 提交诊断材料前，请先阅读日志位置、脱敏要求和支持范围。

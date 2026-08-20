@@ -1,7 +1,7 @@
 Arclume 剑网3模式内置运行资源
 
 本目录中的资源会随 Arclume App 一起发布，首次设置不需要从网络下载。
-这些资源不因 Arclume 采用 GPL 而自动转为 GPL；完整的发布边界和逐项复核记录见仓库根目录的 THIRD-PARTY-NOTICES.md。
+这些资源不因 Arclume 采用 GPL 而自动转为 GPL；完整的组件声明、上游来源和 Wine 对应源码位置见仓库根目录的 THIRD-PARTY-NOTICES.md，以及对应 GitHub Release 的来源链接。
 
 GStreamer framework 1.28.1
 来源：https://github.com/Sikarugir-App/gstreamer/releases/tag/1.28.1
@@ -15,13 +15,15 @@ Noto Sans CJK SC Regular
 来源：https://github.com/notofonts/noto-cjk
 许可证：SIL Open Font License 1.1。
 
-GPTK 4.0 Beta 2 / D3DMetal 4
-资源来自 Arclume 已有的 d3dMetal4 App 资源目录；其许可证文件位于
-d3dMetal4/external/D3DMetal.framework/Versions/A/Resources/LICENSE。
+GPTK / D3DMetal 3 和 4
+作为 Apple 提供的兼容性组件随 Arclume 发布；不属于 Arclume GPL 源码，也不被本项目
+声明为开源。框架保留了所附版权和许可证材料；其中 Resources/LICENSE 是 xxHash 声明，
+不是 D3DMetal.framework 的完整许可文本。适用条款以 Apple Game Porting Toolkit 为准。
 
 Arclume Wine 1.0.0 运行时
-归档 arclume-wine-1.0.0-x86_64.tar.xz 由独立的 Arclume-Runtime 私有仓库构建，
+归档 arclume-wine-1.0.0-x86_64.tar.xz 由独立的 Arclume-Runtime 仓库构建，
 包含用于剑网3的 Wine 11.0 实现、Dock 显示名补丁与 DXVK 文件。Wine 源码许可见上游
-COPYING.LIB（LGPL-2.1-or-later）；公开再分发时需同时提供对应源码和完整许可证。
+COPYING.LIB（LGPL-2.1-or-later）；对应源码、构建脚本和 Runtime 版本信息由该仓库
+与同版本 GitHub Release 提供。
 
-注意：仓库中可能存在额外的游戏相关配置或专有运行时载荷；在公开发布前必须单独确认来源、许可证和再分发权限。
+NVIDIA NGX/DLSS 文件（如被某个后端使用）仍适用 NVIDIA 条款，且不随 Arclume GPL 改变。

@@ -1,0 +1,51 @@
+name: 游戏兼容性报告
+description: 报告游戏在 CrossOver 或 Arclume Wine Runtime 中的启动和运行状况
+title: "compat: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        兼容性报告不会承诺支持特定游戏。请勿上传游戏本体、账号信息、反作弊内容或完整 Prefix。
+  - type: input
+    id: game
+    attributes:
+      label: 游戏名称与版本
+    validations:
+      required: true
+  - type: input
+    id: app
+    attributes:
+      label: Arclume 版本与构建号
+      placeholder: 例如 1.0.1 (3)
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime / CrossOver 版本
+      placeholder: 例如 Arclume Wine 1.0.0 或 CrossOver 26.x
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: macOS 版本与芯片
+    validations:
+      required: true
+  - type: checkboxes
+    id: observed
+    attributes:
+      label: 已观察到的状态
+      options:
+        - label: 可发现游戏
+        - label: 可启动启动器
+        - label: 可进入游戏
+        - label: 文字显示正常
+        - label: 图形后端正常
+  - type: textarea
+    id: details
+    attributes:
+      label: 配置、结果与脱敏日志
+      description: 说明 D3DMetal / DXVK / msync 选择、问题出现时机及最小日志片段。
+    validations:
+      required: true
