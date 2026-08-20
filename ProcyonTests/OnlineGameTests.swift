@@ -14,10 +14,29 @@ struct OnlineGameTests {
         #expect(OnlineGameMode.defaultBottleName == "Games")
     }
 
-    @Test func onlineGameOptionsExposeD3DMetal3AndD3DMetal4() {
-        #expect(OnlineGameMode.onlineGraphicsBackends.map(\.id) == ["d3dmetal3", "d3dmetal4"])
-        #expect(OnlineGameMode.onlineGraphicsBackends.map(\.label) == ["D3DMetal 3", "D3DMetal 4 Beta 2"])
-        #expect(OnlineGameMode.defaultGraphicsBackend == "d3dmetal4")
+    @Test func onlineGameOptionsChooseD3DMetal4OnlyWhenTheSystemSupportsMetal4() {
+        #expect(
+            OnlineGameMode.graphicsBackends(supportingD3DMetal4: true).map(\.id)
+                == ["d3dmetal3", "d3dmetal4"]
+        )
+        #expect(
+            OnlineGameMode.graphicsBackends(supportingD3DMetal4: false).map(\.id)
+                == ["d3dmetal3"]
+        )
+        #expect(OnlineGameMode.defaultGraphicsBackend(supportingD3DMetal4: true) == "d3dmetal4")
+        #expect(OnlineGameMode.defaultGraphicsBackend(supportingD3DMetal4: false) == "d3dmetal3")
+        #expect(
+            OnlineGameMode.resolvedGraphicsBackend(
+                "d3dmetal4",
+                supportingD3DMetal4: false
+            ) == "d3dmetal3"
+        )
+        #expect(
+            OnlineGameMode.resolvedGraphicsBackend(
+                "d3dmetal3",
+                supportingD3DMetal4: false
+            ) == "d3dmetal3"
+        )
         #expect(GameOptions().wineMSync)
         #expect(!GameOptions().dlssFrameGenerationEnabled)
     }
@@ -705,6 +724,7 @@ struct OnlineGameTests {
         #expect(userRegistry.contains("\"Codepages\"=\"936,936\""))
         #expect(userRegistry.contains("\"SimSun\"=\"STSong\""))
         #expect(userRegistry.contains("\"STSong (TrueType)\"=\"Z:\\\\System"))
+        #expect(userRegistry.contains("\"ShowCrashDialog\"=dword:00000000"))
     }
 
     @Test func bundledChineseFontIsCopiedIntoTheBottleAndSelected() throws {
@@ -753,6 +773,43 @@ struct OnlineGameTests {
         #expect(userRegistry.contains("\"SimSun\"=\"Noto Sans CJK SC\""))
         #expect(userRegistry.contains("Noto Sans CJK SC (TrueType)"))
         #expect(userRegistry.contains("C:\\\\windows\\\\Fonts"))
+        #expect(userRegistry.contains("\"ShowCrashDialog\"=dword:00000000"))
+    }
+
+    @Test func sharedGameLogRetentionRemovesOldestFilesAcrossDirectories() throws {
+        let workspace = try temporaryBottle()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+
+        let currentDirectory = workspace.appendingPathComponent("current", isDirectory: true)
+        let legacyDirectory = workspace.appendingPathComponent("legacy", isDirectory: true)
+        try FileManager.default.createDirectory(at: currentDirectory, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: legacyDirectory, withIntermediateDirectories: true)
+
+        let oldestLog = currentDirectory.appendingPathComponent("oldest.log")
+        let newestCrashReport = legacyDirectory.appendingPathComponent("newest.ips")
+        try Data(repeating: 0x31, count: 8).write(to: oldestLog)
+        try Data(repeating: 0x32, count: 8).write(to: newestCrashReport)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1)],
+            ofItemAtPath: oldestLog.path
+        )
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 2)],
+            ofItemAtPath: newestCrashReport.path
+        )
+
+        ProcyonGameLogStore.enforceStorageLimit(
+            in: [currentDirectory, legacyDirectory],
+            maximumBytes: 8
+        )
+
+        #expect(!FileManager.default.fileExists(atPath: oldestLog.path))
+        #expect(FileManager.default.fileExists(atPath: newestCrashReport.path))
+        #expect(
+            ProcyonGameLogStore.storageUsageBytes(
+                in: [currentDirectory, legacyDirectory]
+            ) <= 8
+        )
     }
 
     @Test func bundledNVNGXArchiveReplacesClientDLLsAndKeepsOriginals() throws {

@@ -84,7 +84,10 @@ class WineRegSection {
             values[index].value.type = .dword(value)
             values[index].value.rawLine = "\"\(key)\"=dword:\(String(format: "%08x", value))"
         } else {
-            let val = WineRegValue(type: .dword(value), rawLine: "\"\(key)\"=\"\(String(format: "%08x", value))\"")
+            let val = WineRegValue(
+                type: .dword(value),
+                rawLine: "\"\(key)\"=dword:\(String(format: "%08x", value))"
+            )
             values.append((key: key, value: val))
         }
     }

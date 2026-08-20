@@ -2457,22 +2457,22 @@
         }
       }
     },
-    "Remove %@ from Procyon+?" : {
+    "Remove %@ from Arclume?" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "要从 Procyon+ 中移除 %@ 吗？"
+            "value" : "要从 Arclume 中移除 %@ 吗？"
           }
         }
       }
     },
-    "Remove from Procyon+" : {
+    "Remove from Arclume" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "从 Procyon+ 中移除"
+            "value" : "从 Arclume 中移除"
           }
         }
       }
@@ -2497,12 +2497,12 @@
         }
       }
     },
-    "This only removes the game from Procyon and does not delete its app or files." : {
+    "This only removes the game from Arclume and does not delete its app or files." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这只会从 Procyon 移除游戏，不会删除 App 或其文件。"
+            "value" : "这只会从 Arclume 移除游戏，不会删除 App 或其文件。"
           }
         }
       }

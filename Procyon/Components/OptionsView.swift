@@ -182,7 +182,7 @@ struct OptionsView: View {
                 .font(.headline)
 
             HStack(spacing: 12) {
-                Label("Procyon+", systemImage: "app.badge")
+                Label("Arclume", systemImage: "app.badge")
                     .foregroundStyle(.white.opacity(0.82))
                 Spacer(minLength: 8)
                 Text(applicationVersion)
@@ -200,6 +200,22 @@ struct OptionsView: View {
                     .monospacedDigit()
                     .lineLimit(1)
                     .truncationMode(.middle)
+            }
+
+            Divider()
+                .overlay(.white.opacity(0.12))
+
+            HStack(spacing: 12) {
+                Label("诊断日志", systemImage: "doc.text.magnifyingglass")
+                    .foregroundStyle(.white.opacity(0.82))
+                Spacer(minLength: 8)
+                Text(ProcyonGameLogStore.storageUsageText)
+                    .monospacedDigit()
+                Button("打开") {
+                    showFolder(url: ProcyonGameLogStore.directoryForUser())
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
             .padding(.bottom, 8)
         }

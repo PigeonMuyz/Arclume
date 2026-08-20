@@ -32,7 +32,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		383306842F2BE63D00228E6C /* Procyon+.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Procyon+.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		383306842F2BE63D00228E6C /* Arclume.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Arclume.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		383306962F2BE63E00228E6C /* ProcyonTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProcyonTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		383306A02F2BE63E00228E6C /* ProcyonUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ProcyonUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		385777C02F311EA800346515 /* Logo.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Logo.icon; sourceTree = "<group>"; };
@@ -150,7 +150,7 @@
 		383306852F2BE63D00228E6C /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				383306842F2BE63D00228E6C /* Procyon+.app */,
+				383306842F2BE63D00228E6C /* Arclume.app */,
 				383306962F2BE63E00228E6C /* ProcyonTests.xctest */,
 				383306A02F2BE63E00228E6C /* ProcyonUITests.xctest */,
 			);
@@ -181,8 +181,8 @@
 				3826404D2F2F67A500E1FCC0 /* Flow */,
 				385777BC2F30B37200346515 /* Alamofire */,
 			);
-			productName = "Procyon+";
-			productReference = 383306842F2BE63D00228E6C /* Procyon+.app */;
+			productName = Arclume;
+			productReference = 383306842F2BE63D00228E6C /* Arclume.app */;
 			productType = "com.apple.product-type.application";
 		};
 		383306952F2BE63E00228E6C /* ProcyonTests */ = {
@@ -400,7 +400,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -460,7 +460,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -484,7 +484,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 8JFR5LUFAJ;
 				ENABLE_APP_SANDBOX = NO;
@@ -502,7 +502,7 @@
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Procyon/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Procyon+";
+				INFOPLIST_KEY_CFBundleDisplayName = Arclume;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Events are used to dynamically update your game library as soon as drive is disconnected or become available";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -515,10 +515,10 @@
 					"$(PROJECT_DIR)/Procyon/Libs",
 					"$(PROJECT_DIR)/Procyon/Libs/d3dMetal3/external",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.pigeonmuyz.procyonplus;
 				PRODUCT_MODULE_NAME = Procyon;
-				PRODUCT_NAME = "Procyon+";
+				PRODUCT_NAME = Arclume;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
@@ -550,7 +550,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 8JFR5LUFAJ;
 				ENABLE_APP_SANDBOX = NO;
@@ -568,7 +568,7 @@
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Procyon/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "Procyon+";
+				INFOPLIST_KEY_CFBundleDisplayName = Arclume;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSAppleEventsUsageDescription = "Events are used to dynamically update your game library as soon as drive is disconnected or become available";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -581,10 +581,10 @@
 					"$(PROJECT_DIR)/Procyon/Libs",
 					"$(PROJECT_DIR)/Procyon/Libs/d3dMetal3/external",
 				);
-				MARKETING_VERSION = 1.0;
+				MARKETING_VERSION = 1.0.1;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.pigeonmuyz.procyonplus;
 				PRODUCT_MODULE_NAME = Procyon;
-				PRODUCT_NAME = "Procyon+";
+				PRODUCT_NAME = Arclume;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				RUNTIME_EXCEPTION_ALLOW_DYLD_ENVIRONMENT_VARIABLES = NO;
@@ -611,7 +611,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = S5P3AKN3YC;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.pigeonmuyz.procyonplus.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -620,7 +620,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Procyon+.app/Contents/MacOS/Procyon+";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Arclume.app/Contents/MacOS/Arclume";
 			};
 			name = Debug;
 		};
@@ -633,7 +633,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = S5P3AKN3YC;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.2;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.pigeonmuyz.procyonplus.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -642,7 +642,7 @@
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Procyon+.app/Contents/MacOS/Procyon+";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Arclume.app/Contents/MacOS/Arclume";
 			};
 			name = Release;
 		};

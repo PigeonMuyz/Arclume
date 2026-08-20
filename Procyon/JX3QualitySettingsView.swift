@@ -1455,13 +1455,13 @@ struct JX3QualitySettingsView: View {
         guard let sourceURL = BundledOnlineGameResources.resourceURL(
             named: JX3ConfigPresetImporter.recommendedConfigResourceName
         ) else {
-            errorMessage = "App 内未找到 Procyon 内置画质预设。"
+            errorMessage = "App 内未找到 Arclume 内置画质预设。"
             statusMessage = nil
             return
         }
         applyPreset(
             from: sourceURL,
-            displayName: "Procyon 内置画质预设",
+            displayName: "Arclume 内置画质预设",
             modelEdition: .flagship
         )
     }

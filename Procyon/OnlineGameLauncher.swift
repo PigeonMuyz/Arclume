@@ -578,6 +578,7 @@ enum OnlineGameLauncher {
         process.terminationHandler = { _ in
             writeLaunchLog("Wine 启动命令已退出（状态 \(process.terminationStatus)）", to: logHandle)
             logHandle.closeFile()
+            ProcyonGameLogStore.enforceStorageLimit()
             processLock.lock()
             activeWineProcesses.removeValue(forKey: processIdentifier)
             processLock.unlock()
@@ -609,7 +610,7 @@ enum OnlineGameLauncher {
 
         let logURL = try makeLaunchLogURL()
         let logHandle = try FileHandle(forWritingTo: logURL)
-        writeLaunchLog("开始准备 Procyon 内置 Wine 运行时", to: logHandle)
+        writeLaunchLog("开始准备 Arclume 内置 Wine 运行时", to: logHandle)
 
         let configuration: BundledWineRuntime.LaunchConfiguration
         do {
@@ -623,6 +624,27 @@ enum OnlineGameLauncher {
 
         var environment = configuration.environment
         environment["WINEPREFIX"] = bottleURL.path
+        // Detailed Wine server tracing is developer-only. Test builds retain
+        // their normal launch/crash diagnostics without continuously dumping
+        // every Wine server operation into the user log.
+        if BundledWineRuntime.verboseWineTraceRequested {
+            environment["WINEDEBUG"] = "-all,+timestamp,+pid,+tid,+server,+seh"
+        }
+
+        writeLaunchLog(
+            "内置 Wine 命令：\(configuration.wineURL.path) \(executableURL.path) \(arguments.joined(separator: " "))",
+            to: logHandle
+        )
+#if DEBUG
+        BundledWineRuntime.appendLauncherDiagnostics(
+            runtimeURL: configuration.runtimeURL,
+            wineURL: configuration.wineURL,
+            executableURL: executableURL,
+            arguments: arguments,
+            environment: environment,
+            to: logHandle
+        )
+#endif
 
         let process = Process()
         process.executableURL = configuration.wineURL
@@ -646,12 +668,33 @@ enum OnlineGameLauncher {
             closeLauncherWhenGameStarts: closeLauncherWhenGameStarts
         )
         processLock.unlock()
-        process.terminationHandler = { _ in
-            writeLaunchLog("内置 Wine 启动命令已退出（状态 \(process.terminationStatus)）", to: logHandle)
-            logHandle.closeFile()
-            processLock.lock()
-            activeWineProcesses.removeValue(forKey: processIdentifier)
-            processLock.unlock()
+        process.terminationHandler = { terminatedProcess in
+            writeLaunchLog(
+                "内置 Wine 启动命令已退出（reason \(terminatedProcess.terminationReason)，状态 \(terminatedProcess.terminationStatus)）",
+                to: logHandle
+            )
+            let didCrash = terminatedProcess.terminationReason == .uncaughtSignal
+                || terminatedProcess.terminationStatus == 11
+                || terminatedProcess.terminationStatus == 139
+            let closeLogAndForgetProcess = {
+                logHandle.closeFile()
+                ProcyonGameLogStore.enforceStorageLimit()
+                processLock.lock()
+                activeWineProcesses.removeValue(forKey: processIdentifier)
+                processLock.unlock()
+            }
+            if didCrash {
+                // ReportCrash runs after the child exits. Give it a short
+                // window, then copy the .ips file beside the launch log.
+                DispatchQueue.global(qos: .utility).asyncAfter(
+                    deadline: .now() + 3
+                ) {
+                    BundledWineRuntime.copyRecentWineCrashReports(to: logHandle)
+                    closeLogAndForgetProcess()
+                }
+                return
+            }
+            closeLogAndForgetProcess()
         }
 
         return OnlineGameLaunchSession(
@@ -1116,22 +1159,11 @@ enum OnlineGameLauncher {
 
     private static func writeLaunchLog(_ message: String, to handle: FileHandle) {
         let timestamp = ISO8601DateFormatter().string(from: Date())
-        let line = "[Procyon][\(timestamp)] \(message)\n"
+        let line = "[Arclume][\(timestamp)] \(message)\n"
         handle.write(Data(line.utf8))
     }
 
     private static func makeLaunchLogURL() throws -> URL {
-        let directory = PROCYON_SUPPORT_FOLDER_URL
-            .appendingPathComponent("OnlineGameLogs", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: directory,
-            withIntermediateDirectories: true
-        )
-        let name = "JX3-\(Int(Date().timeIntervalSince1970)).log"
-        let url = directory.appendingPathComponent(name)
-        guard FileManager.default.createFile(atPath: url.path, contents: nil) else {
-            throw CocoaError(.fileWriteUnknown)
-        }
-        return url
+        try ProcyonGameLogStore.createLaunchLogURL()
     }
 }

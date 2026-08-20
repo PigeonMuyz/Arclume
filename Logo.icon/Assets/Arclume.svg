@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
+  <defs>
+    <linearGradient id="arc" x1="204" y1="811" x2="811" y2="202" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#49D6FF"/>
+      <stop offset="0.46" stop-color="#9578FF"/>
+      <stop offset="1" stop-color="#FF79CA"/>
+    </linearGradient>
+    <linearGradient id="spire" x1="343" y1="765" x2="674" y2="236" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#7CE9FF"/>
+      <stop offset="0.48" stop-color="#D7D8FF"/>
+      <stop offset="1" stop-color="#A781FF"/>
+    </linearGradient>
+    <linearGradient id="glint" x1="390" y1="355" x2="630" y2="747" gradientUnits="userSpaceOnUse">
+      <stop stop-color="white" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#E0D7FF" stop-opacity="0.3"/>
+    </linearGradient>
+    <filter id="glow" x="104" y="102" width="816" height="821" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="24" result="blur"/>
+      <feColorMatrix in="blur" type="matrix" values="0 0 0 0 0.45 0 0 0 0 0.35 0 0 0 0 1 0 0 0 .46 0"/>
+      <feBlend in="SourceGraphic"/>
+    </filter>
+  </defs>
+  <!-- A luminous orbit: the runtime's bridge between systems. -->
+  <path d="M210 713C211 881 380 934 533 864C673 799 809 662 807 439C806 302 723 206 612 184" stroke="url(#arc)" stroke-width="82" stroke-linecap="round" filter="url(#glow)"/>
+  <path d="M811 470C803 666 673 810 501 850C359 883 260 825 218 716" stroke="#E6E6FF" stroke-opacity="0.26" stroke-width="16" stroke-linecap="round"/>
+  <!-- Faceted A / upward frame, intentionally legible at small Dock sizes. -->
+  <path d="M302 746L477 263C489 229 535 229 547 263L722 746C735 782 708 814 670 810H605L512 542L419 810H354C316 814 289 782 302 746Z" fill="url(#spire)"/>
+  <path d="M424 661H600" stroke="#20194D" stroke-width="72" stroke-linecap="round"/>
+  <path d="M456 593L512 435L568 593" stroke="url(#glint)" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="512" cy="660" r="15" fill="#E9FBFF"/>
+</svg>

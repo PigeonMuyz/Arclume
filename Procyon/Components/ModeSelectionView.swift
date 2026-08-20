@@ -30,10 +30,10 @@ struct ModeSelectionView: View {
                         .frame(width: 64, height: 64)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
 
-                    Text(allowsCancel ? "选择运行模式" : "欢迎使用 Procyon+")
+                    Text(allowsCancel ? "选择运行模式" : "欢迎使用 Arclume")
                         .font(.largeTitle.weight(.bold))
 
-                    Text("选择后，Procyon+ 会按对应模式扫描和管理游戏。")
+                    Text("选择后，Arclume 会按对应模式扫描和管理游戏。")
                         .font(.headline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -60,7 +60,7 @@ struct ModeSelectionView: View {
                 Text(
                     allowsCancel
                         ? "你可以稍后在设置中切换模式。"
-                        : "这个选择会保存在本机，之后打开 Procyon+ 将直接进入所选模式。"
+                        : "这个选择会保存在本机，之后打开 Arclume 将直接进入所选模式。"
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)

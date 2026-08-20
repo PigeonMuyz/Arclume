@@ -2,9 +2,9 @@
 set -euo pipefail
 
 MODE="${1:-run}"
-APP_NAME="Procyon+"
-PROCESS_NAME_PATTERN="Procyon[+]"
-DISPLAY_NAME="Procyon+"
+APP_NAME="Arclume"
+PROCESS_NAME="Arclume"
+DISPLAY_NAME="Arclume"
 BUNDLE_ID="io.github.pigeonmuyz.procyonplus"
 PROJECT_NAME="Procyon.xcodeproj"
 SCHEME="Procyon"
@@ -35,7 +35,7 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
   exit 1
 fi
 
-pkill -x "$PROCESS_NAME_PATTERN" >/dev/null 2>&1 || true
+pkill -x "$PROCESS_NAME" >/dev/null 2>&1 || true
 
 xcodebuild \
   -project "$PROJECT_PATH" \
@@ -76,7 +76,7 @@ case "$MODE" in
   --verify|verify)
     open_app
     for _ in {1..20}; do
-      if pgrep -x "$PROCESS_NAME_PATTERN" >/dev/null; then
+      if pgrep -x "$PROCESS_NAME" >/dev/null; then
         echo "$DISPLAY_NAME is running."
         exit 0
       fi
