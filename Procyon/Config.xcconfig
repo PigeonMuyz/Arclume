@@ -1,0 +1,8 @@
+API_PROTOCOL = https
+API_HOST =
+API_PATH =
+API_PATH_M =
+API_PATH_CUSTOM =
+API_KEY =
+
+#include? "Config.local.xcconfig"

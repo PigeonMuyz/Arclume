@@ -1,0 +1,27 @@
+Procyon+ 剑网3模式内置运行资源
+
+本目录中的资源会随 Procyon+ App 一起发布，首次设置不需要从网络下载。
+这些资源不因 Procyon+ 采用 GPL 而自动转为 GPL；完整的发布边界和逐项复核记录见仓库根目录的 THIRD-PARTY-NOTICES.md。
+
+GStreamer framework 1.28.1
+来源：https://github.com/Sikarugir-App/gstreamer/releases/tag/1.28.1
+许可证及版权信息随发布压缩包提供。
+
+DXMT v0.80
+来源：https://github.com/3Shain/dxmt/releases/tag/v0.80
+许可证及版权信息随发布压缩包提供。
+
+Noto Sans CJK SC Regular
+来源：https://github.com/notofonts/noto-cjk
+许可证：SIL Open Font License 1.1。
+
+GPTK 4.0 Beta 2 / D3DMetal 4
+资源来自 Procyon+ 已有的 d3dMetal4 App 资源目录；其许可证文件位于
+d3dMetal4/external/D3DMetal.framework/Versions/A/Resources/LICENSE。
+
+自编译 Wine 11.0 运行时
+归档 procyon-wine-runtime-x86_64-v8-mono.tar.xz 包含 Procyon 为剑网3构建的
+Wine 运行时（含 Dock 显示名补丁）与 DXVK 文件。Wine 源码许可见上游
+COPYING.LIB（LGPL-2.1-or-later）；公开再分发时需同时提供对应源码和完整许可证。
+
+注意：仓库中可能存在额外的游戏相关配置或专有运行时载荷；在公开发布前必须单独确认来源、许可证和再分发权限。
