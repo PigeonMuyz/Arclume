@@ -1,0 +1,32 @@
+name: PR 前置审核
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-preflight-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  baseline:
+    name: 静态检查与 Debug 构建
+    runs-on: macos-26
+    timeout-minutes: 35
+
+    steps:
+      - name: 检出源代码和 LFS 资源
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: 前置审核（不运行 XCTest）
+        env:
+          BASE_REF: origin/${{ github.base_ref || 'main' }}
+        run: ./script/pr_preflight.sh

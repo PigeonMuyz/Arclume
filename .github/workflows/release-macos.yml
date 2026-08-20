@@ -198,6 +198,12 @@ jobs:
             "- no-runtime：不含 Wine 归档，适合已有 Runtime 的用户；可在应用设置中下载 Runtime。" \
             "- 要求 macOS 26.0 或更高版本。" \
             "" \
+            "源代码与第三方声明：" \
+            "- App：https://github.com/PigeonMuyz/Arclume/tree/$TAG" \
+            "- Runtime：https://github.com/PigeonMuyz/Arclume-Runtime/tree/arclume-wine-$RUNTIME_VERSION" \
+            "- 组件声明：https://github.com/PigeonMuyz/Arclume/blob/$TAG/THIRD-PARTY-NOTICES.md" \
+            "- D3DMetal 是 Apple 提供的兼容性组件，不属于 Arclume GPL 源码，也不被 Arclume 声明为开源。" \
+            "" \
             "with-runtime SHA-256：$full_checksum" \
             "no-runtime SHA-256：$lite_checksum" \
             "" \

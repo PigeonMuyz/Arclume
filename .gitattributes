@@ -1,4 +1,4 @@
 *.tar.xz filter=lfs diff=lfs merge=lfs -text
 *.tar.gz filter=lfs diff=lfs merge=lfs -text
 *.otf filter=lfs diff=lfs merge=lfs -text
-Procyon/Libs/** filter=lfs diff=lfs merge=lfs -text
+Arclume/Libs/** filter=lfs diff=lfs merge=lfs -text

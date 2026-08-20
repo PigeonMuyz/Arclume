@@ -1,8 +1,6 @@
 # Arclume
 
-> 基于 [italomandara/Procyon](https://github.com/italomandara/Procyon) 的独立、非官方 macOS 游戏启动器。
-
-> 当前 `main` 分支定位为预发布版本：功能、界面和依赖仍可能调整，不代表稳定版或正式发行版。
+> 独立、社区驱动的 macOS 游戏启动器。
 
 [简体中文](#简体中文) · [English](#english)
 
@@ -10,145 +8,128 @@
 
 ## 简体中文
 
-Arclume 统一管理 macOS 原生游戏、Steam 原生游戏，以及由 CrossOver 或 Arclume Wine Runtime 运行的 Windows 游戏。它不是上游 Procyon 的官方版本，也不代表或获得上游作者背书。
+Arclume 用一个本地游戏库管理 macOS 原生游戏、Steam 原生游戏，以及通过 CrossOver 或 Arclume Wine Runtime 启动的 Windows 游戏。它由 Arclume 社区独立维护，不隶属于 CrossOver、CodeWeavers、Steam 或金山，也不获得其背书。
 
-### 主要功能
+### 功能
 
-- 支持导入多个 Steam Library，并分别识别原生 macOS 与 CrossOver 游戏。
-- 扫描 `/Applications` 与 `~/Applications` 中声明为 Game 类别的原生 `.app`，作为独立游戏导入管理。
-- 为游戏显示「原生」「CrossOver」「未经验证」运行状态标签，并允许在详情页维护兼容性信息。
-- 支持每游戏的 CrossOver 图形后端、启动参数、环境变量和其他运行选项；原生 App 提供 Metal HUD 开关。
-- 元数据可来自公开 Steam Store 数据、可选的本地 Steam Store 代理，以及原生 App 对应的 App Store 元数据。
-- 原生 App 可以在编辑器中从元数据候选图中选择封面 URL；没有封面时安全回退到应用图标或空态。
-- 默认提供简体中文界面，也保留英文界面。
+- 导入多个 Steam Library，并区分 macOS 原生游戏与 CrossOver 游戏。
+- 扫描 `/Applications` 和 `~/Applications` 中声明为 Game 的原生 App。
+- 提供原生、CrossOver 与未经验证的运行状态，以及每游戏的兼容性记录。
+- 支持每游戏的 CrossOver 图形后端、启动参数、环境变量与其他运行选项。
+- 提供 Arclume Wine Runtime：D3DMetal 3 / 4、DXVK、msync、Metal HUD 和剑网 3 的独立 Games 容器。
+- 使用公开 Steam Store 数据、可选本地代理和 App Store 元数据补充游戏信息与封面。
+- 提供应用和 Runtime 的独立更新检查、镜像源与自定义更新源。
 
-### 与上游 Procyon 的差异
-
-| 范围 | Arclume |
-| --- | --- |
-| 产品定位 | 独立维护的 Arclume 产品线，不是上游正式版本。 |
-| 原生游戏 | 支持扫描、导入、编辑和启动 macOS 原生游戏。 |
-| 元数据与封面 | 增加本地 Steam Store 代理、App Store 元数据与用户可选封面图。 |
-| 游戏库体验 | 支持多个 Steam Library、Steamworks 过滤、加载空态与更明确的平台状态。 |
-| 启动链 | 为 CrossOver 游戏回移并改进启动识别与 Steam Cloud 同步等待；原生 App 使用 Bundle ID 生命周期追踪。 |
-| Rosetta x87 | 本分支不再捆绑或依赖 rosettaX87 运行时。 |
-| 开发方式 | 本分支新增修改允许 AI 辅助与 Vibe Coding；上游的“禁止提交 Vibe Coding 结果”规则不适用于本仓库，但仍适用于向上游提交代码。 |
-
-### 运行时仓库与版本
-
-应用和 Wine 运行时已拆分为两个 GitHub Private Repo：
-
-- `PigeonMuyz/Arclume`：应用 UI、瓶子管理、启动器和内嵌 Runtime Manifest。
-- `PigeonMuyz/Arclume-Runtime`：Wine 源码锁定、补丁、构建脚本、运行时 ABI 与发行 Manifest。
-
-App 首次发布仍内嵌已验证的 Runtime，以保障离线初始化；`Runtime.lock.json` 和 App 资源中的 Manifest 固定其版本、ABI、归档 SHA-256 与旧版迁移规则。Runtime 的公开版本遵循 `Arclume Wine 1.0.*`，不直接复用上游 Wine 版本号。
-
-### 自动构建与发布
-
-推送 `v*` 标签，或在 GitHub Actions 手动传入既有标签，可由“构建并发布 macOS DMG”工作流在 `macos-26` runner 上检出 LFS 资源、构建通用 DMG，并把 DMG 与 SHA-256 校验文件上传到对应 Release。该工作流不保存任何签名或公证私钥，所以默认产物未签名、未公证；需要面向普通用户分发时，应另行接入 Developer ID 和 Apple Notary 凭据。
-
-### 从 Procyon+ 迁移
-
-首次打开 Arclume 时，若检测到旧的 `~/Library/Application Support/Procyon`，会在同一磁盘卷内移动到 `~/Library/Application Support/Arclume`，不会复制 Games 容器或 Wine 前缀。旧的偏好域会一次性导入到 Arclume；如果目标目录已存在，只移动不冲突的顶层内容，避免覆盖用户的新数据。
-
-### 运行要求
+### 系统要求
 
 - macOS 26.0 或更高版本。
-- 运行 Windows Steam 游戏时，需要自行安装 CrossOver，并在设置中选择 CrossOver App 与目标 bottle。
-- Steam 身份从本机原生 Steam 和当前 CrossOver bottle 的 `loginusers.vdf` 读取，只使用 SteamID、账户名、显示名与最近登录标记；不会读取密码、SSFN 或会话令牌。
+- Windows Steam 游戏需要用户自行安装 CrossOver，并在设置中选择 CrossOver App 和 Bottle。
+- Arclume Wine Runtime 仅面向 x86_64 Windows 游戏；Apple Silicon Mac 通过 Rosetta 运行其 Wine 进程。
 
-### Steam Store 元数据
+### 安装与更新
 
-默认情况下，Arclume 会直接请求公开的 Steam Store API 获取描述、封面和平台元数据，并在请求失败时回退到本地 manifest 或缓存。该请求不需要 Steam 登录凭据。
+Release 提供两种 DMG：
 
-如需调试或通过本地适配器转发请求，也可以在仓库根目录运行：
+| 文件 | 适用场景 |
+| --- | --- |
+| `with-runtime` | 首次安装或需要离线初始化 Arclume Wine 的用户。 |
+| `no-runtime` | 已安装 Runtime 或希望减小下载体积的用户；可在“设置 → 更新”下载 Runtime。 |
+
+每个 DMG 都附带 SHA-256 文件。GitHub Actions 构建的默认产物未签名、未公证；请在安装前核对来源和校验和。
+
+应用内更新不会覆盖用户的 `Games` 容器。Runtime 更新会检查 Manifest、ABI 与 SHA-256，并以原子替换方式更新运行时本体。
+
+### 项目结构
+
+| 路径 | 内容 |
+| --- | --- |
+| `Arclume/` | SwiftUI App、启动器、Bottle、游戏库与资源。 |
+| `ArclumeTests/` | 核心逻辑测试，主要使用 Swift Testing。 |
+| `ArclumeUITests/`、`ArclumeUITestsLaunchTests.swift` | 需要交互桌面会话的 UI XCTest。 |
+| `script/` | 本地构建、Runtime 嵌入和开发辅助脚本。 |
+| `CHANGELOG/` | 不可覆盖的变更记录；每个逻辑改动必须新增条目。 |
+| `docs/` | 架构、开发、测试、Runtime、发布与审核规范。 |
+
+Wine 的源代码锁定、补丁与独立归档由 `Arclume-Runtime` 项目维护；本仓库通过 Runtime Manifest 固定 ABI、版本、归档名和 SHA-256。详见 [Runtime 文档](docs/runtime.md)。
+
+### 开发
+
+先安装 Git LFS，并取得所有 LFS 资源：
 
 ```bash
-python3 script/local_steam_proxy.py
+git lfs install
+git lfs pull
 ```
 
-然后在应用的“设置 → 游戏元数据”中选择“本地 Steam Store 代理”，并重新加载游戏库。该代理仍只查询公开商店数据。
-
-### 构建
+基础构建：
 
 ```bash
-xcodebuild -project Arclume.xcodeproj -scheme Arclume -configuration Debug build
+xcodebuild \
+  -project Arclume.xcodeproj \
+  -scheme Arclume \
+  -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  build
 ```
 
-### AI / Vibe Coding 与贡献说明
+贡献前请阅读：
 
-Arclume 是一个 AI 辅助开发项目：本项目新增修改可以采用 Vibe Coding 工作流。提交前仍应阅读受影响代码、说明改动来源，并提供可复现的手动验证结果。
+- [贡献指南](CONTRIBUTING.md)
+- [Agent 工作约定](AGENTS.md)
+- [开发环境](docs/development.md)
+- [测试策略与新 XCTest 计划](docs/testing.md)
+- [PR 审核规范](docs/pr-review.md)
+- [发布流程](docs/release.md)
 
-上游 Procyon 明确不接受 Vibe Coding 结果。请不要将本仓库的 AI 辅助修改原样提交到上游；如需上游贡献，必须先按上游规则独立审查、重构和验证。
+### 参与共建
 
-### 许可证与声明
+Arclume 是独立项目，在本仓库维护和发布。欢迎通过 Issue、讨论和 PR 一起维护启动体验、兼容性、Runtime 集成、文档与测试；所有贡献均按本仓库的 [贡献指南](CONTRIBUTING.md) 和 [行为准则](CODE_OF_CONDUCT.md) 审核。
 
-本仓库中的 Arclume 源代码（包括其上游 Procyon 衍生部分）以 [GNU GPL v3.0 only](LICENSE.txt) 发布。请保留上游版权、许可证文本和本仓库的 [NOTICE](NOTICE.md)。发布二进制版本时，必须同时提供对应版本的完整源码。
+### 社区与支持
 
-预编译运行库、字体、游戏相关配置/资源和其他第三方组件不因本项目采用 GPL 就自动转为 GPL；发布时请同时遵守其各自的许可证和再分发条件，详见 [第三方声明](THIRD-PARTY-NOTICES.md)。
+- 功能或兼容性请求：使用 Issue 模板，并附上脱敏后的诊断日志。
+- 安全问题：请遵循 [安全策略](SECURITY.md)，不要公开漏洞细节。
+- 使用问题与日志隐私：见 [支持说明](SUPPORT.md)。
+- 行为规范：见 [行为准则](CODE_OF_CONDUCT.md)。
+
+### 许可证与第三方组件
+
+Arclume 源代码采用 [GNU GPL v3.0 only](LICENSE.txt)。发布二进制时必须提供相应版本的完整源码，并保留现有源文件中的版权、许可证及适用的附加法律声明。
+
+Wine、DXVK、D3DMetal、字体和游戏相关资源拥有各自的许可证与再分发条件；它们不会因 Arclume 使用 GPL 自动改变许可证。D3DMetal 不是 Arclume 开源代码，也不因本仓库公开而改变其 Apple 条款。每个二进制 Release 均在同一 GitHub Release 页面指向对应源码与第三方声明；详见 [第三方声明](THIRD-PARTY-NOTICES.md)。
 
 ---
 
 ## English
 
-Arclume is an independent, unofficial macOS game launcher based on [italomandara/Procyon](https://github.com/italomandara/Procyon). It manages native macOS games, native Steam games, and Windows games run through CrossOver or Arclume Wine Runtime. It is not an official upstream release and is not endorsed by the upstream author.
-
-The `main` branch is currently a pre-release line. Features, UI, and dependencies may change before a stable or formal release.
+Arclume is an independent, community-driven macOS game launcher. It manages native macOS games, native Steam games, and Windows games launched through CrossOver or the Arclume Wine Runtime. It is independently maintained by the Arclume community and is not affiliated with or endorsed by CrossOver, CodeWeavers, Steam, or Kingsoft.
 
 ### Highlights
 
-- Multiple Steam Library folders with native macOS and CrossOver game discovery.
-- Import and management of native `.app` games from `/Applications` and `~/Applications` when they declare the Game application category.
-- Native, CrossOver, and Unverified runtime tags, with per-game compatibility information.
-- Per-game CrossOver launch settings and a Metal HUD setting for native apps.
-- Public Steam Store metadata, an optional loopback-only Steam Store proxy, and App Store metadata/image candidates for native apps.
-- User-selectable metadata artwork URLs with safe app-icon and empty-state fallbacks.
-- Simplified Chinese is the default documentation language; English is included here.
-
-### How this fork differs from upstream
-
-Arclume adds native game management, multi-library improvements, metadata and artwork workflows, explicit runtime status, a selective backport of CrossOver launch/Steam Cloud handling, and removes the bundled rosettaX87 runtime dependency.
-
-This fork accepts AI-assisted and Vibe Coding contributions. Upstream Procyon does not accept Vibe Coding results, so changes from this repository must not be submitted upstream unchanged; they require an independent upstream-compliant review, rewrite, and validation.
-
-### Runtime repositories
-
-`PigeonMuyz/Arclume` owns the App, launcher integration and bundled Runtime Manifest. `PigeonMuyz/Arclume-Runtime` owns Wine source locks, patches, build scripts, ABI and release manifests. The App embeds a tested runtime for first-run/offline setup, while `Runtime.lock.json` pins the selected private Runtime release.
-
-### Automated builds and releases
-
-Pushing a `v*` tag, or manually providing an existing tag in GitHub Actions, runs the **Build and release macOS DMG** workflow on `macos-26`. It checks out LFS assets, builds a universal DMG, and uploads the DMG plus a SHA-256 file to the matching Release. The workflow intentionally stores no signing or notarization secret, so its default artifacts are unsigned and unnotarized; Developer ID and Apple Notary credentials are required before general end-user distribution.
-
-### Migration from Procyon+
-
-On first launch, Arclume moves an existing `~/Library/Application Support/Procyon` directory to `~/Library/Application Support/Arclume` on the same volume, so Games containers and Wine prefixes are not copied. Preferences are imported once. If the destination already exists, only non-conflicting top-level entries are moved.
+- Multiple Steam Library imports, native/CrossOver discovery, and native Game-app scanning.
+- Per-game compatibility data, launch options, graphics backends, environment variables, and metadata artwork.
+- An independently versioned Arclume Wine Runtime with D3DMetal 3/4, DXVK, msync, Metal HUD, and a dedicated JX3 Games prefix.
+- Separate application and Runtime update checks, automatic fallback, built-in mirrors, and custom HTTPS update sources.
 
 ### Requirements
 
 - macOS 26.0 or later.
-- CrossOver is required for Windows Steam games and must be selected with a target bottle in Settings.
-- Steam identities are discovered from `loginusers.vdf` in native Steam and the current CrossOver bottle. Arclume only uses the SteamID, account/display names, and recent-login flags; it never reads passwords, SSFN files, or session tokens.
+- CrossOver is user-supplied for Windows Steam games.
+- The bundled Runtime targets x86_64 Windows software; Wine runs through Rosetta on Apple Silicon Macs.
 
-### Steam Store metadata
+### Distribution
 
-Arclume directly requests the public Steam Store API by default, with local-manifest and stale-cache fallback. These requests do not require Steam credentials.
+Each Release contains two unsigned, unnotarized DMGs and matching SHA-256 files:
 
-For debugging or local request adaptation, the optional loopback proxy remains available:
+- `with-runtime` includes the verified Wine archive for first-run or offline setup.
+- `no-runtime` is smaller and is intended for users who already have a Runtime; the Runtime can be downloaded in **Settings → Updates**.
 
-```bash
-python3 script/local_steam_proxy.py
-```
+Application updates never replace a user's `Games` prefix. Runtime updates validate their Manifest, ABI and SHA-256, then atomically replace only the immutable runtime files.
 
-Choose **Local Steam Store proxy** under **Settings → Game metadata**, then reload the library. The proxy only requests public Steam Store data.
+### Contributing
 
-### Build
-
-```bash
-xcodebuild -project Arclume.xcodeproj -scheme Arclume -configuration Debug build
-```
+Arclume is maintained and released here. Start with [CONTRIBUTING.md](CONTRIBUTING.md), [AGENTS.md](AGENTS.md), and the [documentation index](docs/development.md). Every logical change must add a new immutable entry under [CHANGELOG/](CHANGELOG/README.md).
 
 ### License
 
-The Arclume source code in this repository, including its upstream-derived Procyon portions, is licensed under [GPL-3.0-only](LICENSE.txt). Keep the upstream copyright notices and this repository's [NOTICE](NOTICE.md) when redistributing it.
-
-Prebuilt runtime libraries, fonts, game-related configuration/resources, and other third-party components are not relicensed by this project; follow their own license and redistribution terms in the [third-party notices](THIRD-PARTY-NOTICES.md).
+Arclume source code is licensed under [GPL-3.0-only](LICENSE.txt). Runtime libraries, fonts, and game-related resources retain their own licenses; see [NOTICE.md](NOTICE.md) and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
