@@ -21,8 +21,6 @@ jobs:
     env:
       PROJECT: Arclume.xcodeproj
       SCHEME: Arclume
-      ARCHIVE_PATH: ${{ runner.temp }}/Arclume.xcarchive
-      ARTIFACT_DIR: ${{ runner.temp }}/arclume-release
       GH_TOKEN: ${{ github.token }}
 
     steps:
@@ -40,12 +38,13 @@ jobs:
 
       - name: 构建未签名 Archive
         run: |
+          archive_path="$RUNNER_TEMP/Arclume.xcarchive"
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -configuration Release \
             -destination "generic/platform=macOS" \
-            -archivePath "$ARCHIVE_PATH" \
+            -archivePath "$archive_path" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=- \
@@ -54,7 +53,9 @@ jobs:
       - name: 制作并校验 DMG
         id: package
         run: |
-          app_path="$ARCHIVE_PATH/Products/Applications/Arclume.app"
+          archive_path="$RUNNER_TEMP/Arclume.xcarchive"
+          artifact_dir="$RUNNER_TEMP/arclume-release"
+          app_path="$archive_path/Products/Applications/Arclume.app"
           test -d "$app_path"
 
           version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app_path/Contents/Info.plist")
@@ -62,8 +63,8 @@ jobs:
           tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
           dmg_name="Arclume-${version}-${build}.dmg"
 
-          mkdir -p "$ARTIFACT_DIR"
-          dmg_path="$ARTIFACT_DIR/$dmg_name"
+          mkdir -p "$artifact_dir"
+          dmg_path="$artifact_dir/$dmg_name"
           hdiutil create \
             -volname "Arclume" \
             -srcfolder "$app_path" \
@@ -74,6 +75,7 @@ jobs:
           shasum -a 256 "$dmg_path" > "$dmg_path.sha256"
 
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
           echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
           echo "checksum_path=$dmg_path.sha256" >> "$GITHUB_OUTPUT"
           echo "release_name=Arclume $version ($build)" >> "$GITHUB_OUTPUT"
@@ -82,7 +84,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Arclume-${{ steps.package.outputs.tag }}
-          path: ${{ env.ARTIFACT_DIR }}
+          path: ${{ steps.package.outputs.artifact_dir }}
           if-no-files-found: error
 
       - name: 发布 GitHub Release
