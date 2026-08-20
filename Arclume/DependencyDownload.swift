@@ -103,16 +103,8 @@ enum DependencyArchiveStore {
 }
 
 enum DependencyDownloadSources {
-    /// This proxy documents GitHub release-asset acceleration. Every mirrored
-    /// result still goes through archive validation, and the official GitHub
-    /// URL remains the final fallback.
-    private static let mirrorPrefixes = ["https://gh-proxy.com/"]
-
     static func candidates(for officialURL: URL) -> [URL] {
-        let mirrored = mirrorPrefixes.compactMap { prefix in
-            URL(string: prefix + officialURL.absoluteString)
-        }
-        return mirrored + [officialURL]
+        ArclumeUpdateSource.candidates(for: officialURL).map(\.url)
     }
 
     static func fetchLatestReleaseTag(repositoryAPIPath: String) async throws -> String {
@@ -130,6 +122,11 @@ enum DependencyDownloadSources {
                 }
                 let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
                 if let tag = json?["tag_name"] as? String, !tag.isEmpty {
+                    if let source = ArclumeUpdateSource.candidates(for: officialURL)
+                        .first(where: { $0.url == candidate })
+                    {
+                        ArclumeUpdateSource.rememberSuccessfulCandidate(source)
+                    }
                     return tag
                 }
                 throw URLError(.cannotParseResponse)

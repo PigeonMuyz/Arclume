@@ -2,13 +2,14 @@ name: 构建并发布 macOS DMG
 
 on:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
   workflow_dispatch:
     inputs:
-      tag:
-        description: "要发布的既有 Git 标签，例如 v1.0.1-3"
+      release:
+        description: "github actions，或与 App 版本一致的版本号，例如 1.0.1-3"
         required: true
+        default: "github actions"
         type: string
 
 permissions:
@@ -17,6 +18,9 @@ permissions:
 jobs:
   build-and-release:
     name: 构建 macOS DMG
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      contains(github.event.head_commit.message, 'release:')
     runs-on: macos-26
     env:
       PROJECT: Arclume.xcodeproj
@@ -36,6 +40,64 @@ jobs:
           xcodebuild -version
           git lfs version
 
+      - name: 读取并校验发布版本
+        id: release
+        env:
+          RELEASE_INPUT: ${{ inputs.release }}
+        run: |
+          set -euo pipefail
+
+          build_settings=$(xcodebuild -showBuildSettings \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release)
+          version=$(printf '%s\n' "$build_settings" | awk -F ' = ' '/^[[:space:]]*MARKETING_VERSION = / { print $2; exit }')
+          build=$(printf '%s\n' "$build_settings" | awk -F ' = ' '/^[[:space:]]*CURRENT_PROJECT_VERSION = / { print $2; exit }')
+          test -n "$version"
+          test -n "$build"
+
+          expected_tag="v${version}-${build}"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            directive="$RELEASE_INPUT"
+          else
+            directive=$(jq -r '.head_commit.message // empty' "$GITHUB_EVENT_PATH" | awk '
+              match($0, /^[[:space:]]*release:[[:space:]]*/) {
+                sub(/^[[:space:]]*release:[[:space:]]*/, "")
+                print
+                exit
+              }
+            ')
+          fi
+          directive=$(printf '%s' "$directive" | xargs)
+          test -n "$directive"
+
+          if [ "$(printf '%s' "$directive" | tr '[:upper:]' '[:lower:]')" = "github actions" ]; then
+            tag="$expected_tag"
+          else
+            requested_tag="$directive"
+            case "$requested_tag" in
+              v*) ;;
+              *) requested_tag="v${requested_tag}" ;;
+            esac
+            if [ "$requested_tag" != "$expected_tag" ]; then
+              echo "release 指令版本为 $requested_tag，但项目版本为 $expected_tag。请更新项目内部版本或修正提交信息。" >&2
+              exit 1
+            fi
+            tag="$requested_tag"
+          fi
+
+          runtime_manifest="Arclume/Resources/OnlineGameDependencies/arclume-wine-runtime.json"
+          runtime_version=$(plutil -extract version raw "$runtime_manifest")
+          test -n "$runtime_version"
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "build=$build"
+            echo "runtime_version=$runtime_version"
+            echo "release_name=Arclume $version ($build)"
+          } >> "$GITHUB_OUTPUT"
+
       - name: 构建未签名 Archive
         run: |
           archive_path="$RUNNER_TEMP/Arclume.xcarchive"
@@ -50,72 +112,110 @@ jobs:
             CODE_SIGN_IDENTITY=- \
             SWIFT_EMIT_LOC_STRINGS=NO
 
-      - name: 制作并校验 DMG
+      - name: 制作含 Runtime 与轻量 DMG
         id: package
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          BUILD: ${{ steps.release.outputs.build }}
         run: |
+          set -euo pipefail
+
           archive_path="$RUNNER_TEMP/Arclume.xcarchive"
           artifact_dir="$RUNNER_TEMP/arclume-release"
-          app_path="$archive_path/Products/Applications/Arclume.app"
-          test -d "$app_path"
+          full_app_path="$archive_path/Products/Applications/Arclume.app"
+          lite_app_path="$RUNNER_TEMP/Arclume-no-runtime.app"
+          test -d "$full_app_path"
 
-          version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app_path/Contents/Info.plist")
-          build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$app_path/Contents/Info.plist")
-          tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
-          dmg_name="Arclume-${version}-${build}.dmg"
+          bundle_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$full_app_path/Contents/Info.plist")
+          bundle_build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$full_app_path/Contents/Info.plist")
+          test "$bundle_version" = "$VERSION"
+          test "$bundle_build" = "$BUILD"
 
           mkdir -p "$artifact_dir"
-          dmg_path="$artifact_dir/$dmg_name"
+          full_dmg_path="$artifact_dir/Arclume-${VERSION}-${BUILD}-with-runtime.dmg"
+          lite_dmg_path="$artifact_dir/Arclume-${VERSION}-${BUILD}-no-runtime.dmg"
+
           hdiutil create \
             -volname "Arclume" \
-            -srcfolder "$app_path" \
+            -srcfolder "$full_app_path" \
             -format UDZO \
             -imagekey zlib-level=9 \
-            "$dmg_path"
-          hdiutil verify "$dmg_path"
-          shasum -a 256 "$dmg_path" > "$dmg_path.sha256"
+            "$full_dmg_path"
+          hdiutil verify "$full_dmg_path"
 
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "artifact_dir=$artifact_dir" >> "$GITHUB_OUTPUT"
-          echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
-          echo "checksum_path=$dmg_path.sha256" >> "$GITHUB_OUTPUT"
-          echo "release_name=Arclume $version ($build)" >> "$GITHUB_OUTPUT"
+          ditto "$full_app_path" "$lite_app_path"
+          runtime_archives=("$lite_app_path/Contents/Resources/OnlineGameDependencies"/arclume-wine-*.tar.xz)
+          test -e "${runtime_archives[0]}"
+          rm -f "${runtime_archives[@]}"
+          hdiutil create \
+            -volname "Arclume" \
+            -srcfolder "$lite_app_path" \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            "$lite_dmg_path"
+          hdiutil verify "$lite_dmg_path"
+
+          full_checksum_path="$full_dmg_path.sha256"
+          lite_checksum_path="$lite_dmg_path.sha256"
+          shasum -a 256 "$full_dmg_path" > "$full_checksum_path"
+          shasum -a 256 "$lite_dmg_path" > "$lite_checksum_path"
+
+          {
+            echo "artifact_dir=$artifact_dir"
+            echo "full_dmg_path=$full_dmg_path"
+            echo "lite_dmg_path=$lite_dmg_path"
+            echo "full_checksum_path=$full_checksum_path"
+            echo "lite_checksum_path=$lite_checksum_path"
+          } >> "$GITHUB_OUTPUT"
 
       - name: 保存构建产物
         uses: actions/upload-artifact@v4
         with:
-          name: Arclume-${{ steps.package.outputs.tag }}
+          name: Arclume-${{ steps.release.outputs.tag }}
           path: ${{ steps.package.outputs.artifact_dir }}
           if-no-files-found: error
 
       - name: 发布 GitHub Release
         env:
-          TAG: ${{ steps.package.outputs.tag }}
-          DMG_PATH: ${{ steps.package.outputs.dmg_path }}
-          CHECKSUM_PATH: ${{ steps.package.outputs.checksum_path }}
-          RELEASE_NAME: ${{ steps.package.outputs.release_name }}
+          TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_NAME: ${{ steps.release.outputs.release_name }}
+          RUNTIME_VERSION: ${{ steps.release.outputs.runtime_version }}
+          FULL_DMG_PATH: ${{ steps.package.outputs.full_dmg_path }}
+          LITE_DMG_PATH: ${{ steps.package.outputs.lite_dmg_path }}
+          FULL_CHECKSUM_PATH: ${{ steps.package.outputs.full_checksum_path }}
+          LITE_CHECKSUM_PATH: ${{ steps.package.outputs.lite_checksum_path }}
         run: |
-          checksum=$(awk '{print $1}' "$CHECKSUM_PATH")
+          set -euo pipefail
+
+          full_checksum=$(awk '{print $1}' "$FULL_CHECKSUM_PATH")
+          lite_checksum=$(awk '{print $1}' "$LITE_CHECKSUM_PATH")
           notes=$(printf '%s\n' \
             "由 GitHub Actions 的 macos-26 runner 自动构建。" \
             "" \
             "- 应用：$RELEASE_NAME" \
-            "- 内嵌运行时：Arclume Wine 1.0.0" \
-            "- 包含 Procyon 到 Arclume 的首次启动数据迁移。" \
+            "- Arclume Wine：$RUNTIME_VERSION" \
+            "- with-runtime：首次安装可直接初始化内置 Wine。" \
+            "- no-runtime：不含 Wine 归档，适合已有 Runtime 的用户；可在应用设置中下载 Runtime。" \
             "- 要求 macOS 26.0 或更高版本。" \
             "" \
-            "DMG SHA-256：\`$checksum\`" \
+            "with-runtime SHA-256：$full_checksum" \
+            "no-runtime SHA-256：$lite_checksum" \
             "" \
             "此自动构建流程不保存代码签名或公证私钥，因此 DMG 未签名、未公证。")
 
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
               --title "$RELEASE_NAME" \
-              --notes "$notes" \
-              --verify-tag
+              --notes "$notes"
           fi
 
-          gh release upload "$TAG" "$DMG_PATH" "$CHECKSUM_PATH" \
+          gh release upload "$TAG" \
+            "$FULL_DMG_PATH" \
+            "$LITE_DMG_PATH" \
+            "$FULL_CHECKSUM_PATH" \
+            "$LITE_CHECKSUM_PATH" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
           gh release edit "$TAG" \

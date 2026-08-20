@@ -242,7 +242,7 @@ enum BundledWineRuntimeError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingArchive:
-            "App 内未找到 Arclume Wine 运行时归档。"
+            "本版本未包含 Arclume Wine。请在“设置 > 更新”中下载 Runtime，或使用 with-runtime 安装包。"
         case .missingManifest:
             "App 内未找到 Arclume Wine Runtime Manifest。"
         case .invalidRuntime:
@@ -501,6 +501,85 @@ enum BundledWineRuntime {
             fileManager: fileManager
         )
         progress?(1, "内置 Wine \(expectedVersion) 已准备完成")
+        return installationURL
+    }
+
+    /// A downloadable Runtime may replace Wine without moving the Games
+    /// container only when its ABI contract matches the one bundled with the
+    /// current App. Keep this narrow: accepting a different prefix ABI could
+    /// make an existing game prefix silently unusable.
+    nonisolated static func supportsDownloadedRuntimeManifest(
+        _ downloadedManifest: ArclumeRuntimeManifest
+    ) -> Bool {
+        guard let bundledManifest = try? requiredRuntimeManifest() else {
+            return false
+        }
+        return downloadedManifest.id == bundledManifest.id
+            && downloadedManifest.runtimeABI == bundledManifest.runtimeABI
+            && downloadedManifest.prefixABI == bundledManifest.prefixABI
+            && downloadedManifest.architecture == bundledManifest.architecture
+    }
+
+    /// Installs a checksum-verified release archive into the same immutable
+    /// Runtime location as the App-bundled archive. The existing Games prefix
+    /// deliberately lives elsewhere and is never copied, moved or recreated.
+    @discardableResult
+    nonisolated static func installDownloadedRuntimeArchive(
+        _ archiveURL: URL,
+        manifest downloadedManifest: ArclumeRuntimeManifest,
+        progress: ProgressHandler? = nil
+    ) throws -> URL {
+        try downloadedManifest.validate()
+        guard supportsDownloadedRuntimeManifest(downloadedManifest) else {
+            throw ArclumeRuntimeManifestError.invalid("与当前 Games 容器 ABI 不兼容")
+        }
+        guard try archiveSHA256(at: archiveURL)
+            .caseInsensitiveCompare(downloadedManifest.archive.sha256) == .orderedSame
+        else {
+            throw BundledWineRuntimeError.archiveChecksumMismatch
+        }
+
+        progress?(0.02, "正在校验 Arclume Wine 更新…")
+        installationLock.lock()
+        defer { installationLock.unlock() }
+
+        let fileManager = FileManager.default
+        let parentURL = installationURL.deletingLastPathComponent()
+        try fileManager.createDirectory(at: parentURL, withIntermediateDirectories: true)
+        progress?(0.06, "正在分析 Arclume Wine 更新归档…")
+        let entryCount = try archiveEntryCount(in: archiveURL)
+        let stagingURL = parentURL.appendingPathComponent(
+            ".\(downloadedManifest.archive.rootDirectory)-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: stagingURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: stagingURL) }
+
+        try extractRuntimeArchive(
+            archiveURL,
+            into: stagingURL,
+            totalEntries: entryCount,
+            progress: progress
+        )
+        let extractedRuntimeURL = stagingURL.appendingPathComponent(
+            downloadedManifest.archive.rootDirectory,
+            isDirectory: true
+        )
+        progress?(0.94, "正在校验 Arclume Wine 更新…")
+        guard isCurrentRuntime(
+            at: extractedRuntimeURL,
+            expectedVersion: downloadedManifest.version
+        ) else {
+            throw BundledWineRuntimeError.runtimeVersionMismatch(
+                installedRuntimeVersion(at: extractedRuntimeURL)
+            )
+        }
+        try replaceInstalledRuntime(
+            with: extractedRuntimeURL,
+            previousRootName: downloadedManifest.archive.rootDirectory,
+            fileManager: fileManager
+        )
+        progress?(1, "Arclume Wine \(downloadedManifest.version) 已准备完成")
         return installationURL
     }
 
@@ -1056,6 +1135,7 @@ enum BundledWineRuntime {
     /// can be rolled back without touching the prefix.
     nonisolated private static func replaceInstalledRuntime(
         with extractedRuntimeURL: URL,
+        previousRootName: String = archiveRootName,
         fileManager: FileManager
     ) throws {
         guard fileManager.fileExists(atPath: installationURL.path) else {
@@ -1065,7 +1145,7 @@ enum BundledWineRuntime {
 
         let previousRuntimeURL = installationURL.deletingLastPathComponent()
             .appendingPathComponent(
-                ".\(archiveRootName)-previous-\(UUID().uuidString)",
+                ".\(previousRootName)-previous-\(UUID().uuidString)",
                 isDirectory: true
             )
         try fileManager.moveItem(at: installationURL, to: previousRuntimeURL)
