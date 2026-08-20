@@ -1,0 +1,124 @@
+name: 构建并发布 macOS DMG
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要发布的既有 Git 标签，例如 v1.0.1-3"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: 构建 macOS DMG
+    runs-on: macos-26
+    env:
+      PROJECT: Arclume.xcodeproj
+      SCHEME: Arclume
+      ARCHIVE_PATH: ${{ runner.temp }}/Arclume.xcarchive
+      ARTIFACT_DIR: ${{ runner.temp }}/arclume-release
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: 检出源代码和 LFS 资源
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: 确认构建环境
+        run: |
+          sw_vers
+          xcodebuild -version
+          git lfs version
+
+      - name: 构建未签名 Archive
+        run: |
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=- \
+            SWIFT_EMIT_LOC_STRINGS=NO
+
+      - name: 制作并校验 DMG
+        id: package
+        run: |
+          app_path="$ARCHIVE_PATH/Products/Applications/Arclume.app"
+          test -d "$app_path"
+
+          version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$app_path/Contents/Info.plist")
+          build=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$app_path/Contents/Info.plist")
+          tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          dmg_name="Arclume-${version}-${build}.dmg"
+
+          mkdir -p "$ARTIFACT_DIR"
+          dmg_path="$ARTIFACT_DIR/$dmg_name"
+          hdiutil create \
+            -volname "Arclume" \
+            -srcfolder "$app_path" \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            "$dmg_path"
+          hdiutil verify "$dmg_path"
+          shasum -a 256 "$dmg_path" > "$dmg_path.sha256"
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
+          echo "checksum_path=$dmg_path.sha256" >> "$GITHUB_OUTPUT"
+          echo "release_name=Arclume $version ($build)" >> "$GITHUB_OUTPUT"
+
+      - name: 保存构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: Arclume-${{ steps.package.outputs.tag }}
+          path: ${{ env.ARTIFACT_DIR }}
+          if-no-files-found: error
+
+      - name: 发布 GitHub Release
+        env:
+          TAG: ${{ steps.package.outputs.tag }}
+          DMG_PATH: ${{ steps.package.outputs.dmg_path }}
+          CHECKSUM_PATH: ${{ steps.package.outputs.checksum_path }}
+          RELEASE_NAME: ${{ steps.package.outputs.release_name }}
+        run: |
+          checksum=$(awk '{print $1}' "$CHECKSUM_PATH")
+          notes=$(printf '%s\n' \
+            "由 GitHub Actions 的 macos-26 runner 自动构建。" \
+            "" \
+            "- 应用：$RELEASE_NAME" \
+            "- 内嵌运行时：Arclume Wine 1.0.0" \
+            "- 包含 Procyon 到 Arclume 的首次启动数据迁移。" \
+            "- 要求 macOS 26.0 或更高版本。" \
+            "" \
+            "DMG SHA-256：\`$checksum\`" \
+            "" \
+            "此自动构建流程不保存代码签名或公证私钥，因此 DMG 未签名、未公证。")
+
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_NAME" \
+              --notes "$notes" \
+              --verify-tag
+          fi
+
+          gh release upload "$TAG" "$DMG_PATH" "$CHECKSUM_PATH" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+          gh release edit "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$RELEASE_NAME" \
+            --notes "$notes" \
+            --prerelease=false \
+            --latest
