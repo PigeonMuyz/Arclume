@@ -43,6 +43,10 @@ Arclume 统一管理 macOS 原生游戏、Steam 原生游戏，以及由 CrossOv
 
 App 首次发布仍内嵌已验证的 Runtime，以保障离线初始化；`Runtime.lock.json` 和 App 资源中的 Manifest 固定其版本、ABI、归档 SHA-256 与旧版迁移规则。Runtime 的公开版本遵循 `Arclume Wine 1.0.*`，不直接复用上游 Wine 版本号。
 
+### 自动构建与发布
+
+推送 `v*` 标签，或在 GitHub Actions 手动传入既有标签，可由“构建并发布 macOS DMG”工作流在 `macos-26` runner 上检出 LFS 资源、构建通用 DMG，并把 DMG 与 SHA-256 校验文件上传到对应 Release。该工作流不保存任何签名或公证私钥，所以默认产物未签名、未公证；需要面向普通用户分发时，应另行接入 Developer ID 和 Apple Notary 凭据。
+
 ### 从 Procyon+ 迁移
 
 首次打开 Arclume 时，若检测到旧的 `~/Library/Application Support/Procyon`，会在同一磁盘卷内移动到 `~/Library/Application Support/Arclume`，不会复制 Games 容器或 Wine 前缀。旧的偏好域会一次性导入到 Arclume；如果目标目录已存在，只移动不冲突的顶层内容，避免覆盖用户的新数据。
@@ -110,6 +114,10 @@ This fork accepts AI-assisted and Vibe Coding contributions. Upstream Procyon do
 ### Runtime repositories
 
 `PigeonMuyz/Arclume` owns the App, launcher integration and bundled Runtime Manifest. `PigeonMuyz/Arclume-Runtime` owns Wine source locks, patches, build scripts, ABI and release manifests. The App embeds a tested runtime for first-run/offline setup, while `Runtime.lock.json` pins the selected private Runtime release.
+
+### Automated builds and releases
+
+Pushing a `v*` tag, or manually providing an existing tag in GitHub Actions, runs the **Build and release macOS DMG** workflow on `macos-26`. It checks out LFS assets, builds a universal DMG, and uploads the DMG plus a SHA-256 file to the matching Release. The workflow intentionally stores no signing or notarization secret, so its default artifacts are unsigned and unnotarized; Developer ID and Apple Notary credentials are required before general end-user distribution.
 
 ### Migration from Procyon+
 
