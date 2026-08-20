@@ -28,12 +28,14 @@ var api = SteamAPI()
 @main
 struct ArclumeApp: App {
     @StateObject private var appSettings: AppSettings
+    @StateObject private var updateService: ArclumeUpdateService
 
     init() {
         migrateLegacyProcyonDataIfNeeded()
         migrateLegacyDefaultsIfNeeded()
         migrateUnavailableConfiguredMetadataSourceIfNeeded()
         _appSettings = StateObject(wrappedValue: AppSettings())
+        _updateService = StateObject(wrappedValue: ArclumeUpdateService())
     }
 
     var body: some Scene {
@@ -42,6 +44,7 @@ struct ArclumeApp: App {
                 .frame(width: appWindowResizable ? nil : windowWidth, height: appWindowResizable ? nil : windowHeight)
                 .environment(\.locale, appSettings.language.locale)
                 .environmentObject(appSettings)
+                .environmentObject(updateService)
                 .onAppear {
                     // Disable "Show Tab Bar" globally
                     NSWindow.allowsAutomaticWindowTabbing = false

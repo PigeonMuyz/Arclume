@@ -5,7 +5,7 @@
 
 import Foundation
 
-enum ArclumeRuntimeManifestError: LocalizedError {
+nonisolated enum ArclumeRuntimeManifestError: LocalizedError {
     case missing
     case invalid(String)
 
@@ -23,8 +23,8 @@ enum ArclumeRuntimeManifestError: LocalizedError {
 /// `Arclume-Runtime` repository. Keep this deliberately small: it is enough
 /// to install, validate, update and migrate a runtime without coupling the
 /// launcher to Wine's source-tree layout.
-struct ArclumeRuntimeManifest: Codable, Equatable, Sendable {
-    struct Archive: Codable, Equatable, Sendable {
+nonisolated struct ArclumeRuntimeManifest: Codable, Equatable, Sendable {
+    nonisolated struct Archive: Codable, Equatable, Sendable {
         let name: String
         let sha256: String
         let rootDirectory: String
