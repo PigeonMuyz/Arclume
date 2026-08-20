@@ -5,9 +5,9 @@ MODE="${1:-run}"
 APP_NAME="Arclume"
 PROCESS_NAME="Arclume"
 DISPLAY_NAME="Arclume"
-BUNDLE_ID="io.github.pigeonmuyz.procyonplus"
-PROJECT_NAME="Procyon.xcodeproj"
-SCHEME="Procyon"
+BUNDLE_ID="io.github.pigeonmuyz.arclume"
+PROJECT_NAME="Arclume.xcodeproj"
+SCHEME="Arclume"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,7 +15,7 @@ PROJECT_PATH="$ROOT_DIR/$PROJECT_NAME"
 DERIVED_DATA_PATH="$ROOT_DIR/DerivedData"
 APP_BUNDLE="$DERIVED_DATA_PATH/Build/Products/$CONFIGURATION/$APP_NAME.app"
 APP_BINARY="$APP_BUNDLE/Contents/MacOS/$APP_NAME"
-CONFIG_FILE="$ROOT_DIR/Procyon/Config.xcconfig"
+CONFIG_FILE="$ROOT_DIR/Arclume/Config.xcconfig"
 
 usage() {
   echo "usage: $0 [run|debug|logs|telemetry|verify]" >&2

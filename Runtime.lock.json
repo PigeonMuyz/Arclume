@@ -5,6 +5,6 @@
   "runtimeReleaseTag": "arclume-wine-1.0.0",
   "runtimeVersion": "1.0.0",
   "channel": "stable",
-  "releaseManifest": "Procyon/Resources/OnlineGameDependencies/arclume-wine-runtime.json",
+  "releaseManifest": "Arclume/Resources/OnlineGameDependencies/arclume-wine-runtime.json",
   "purpose": "Pins the bundled Arclume Wine release contract used by this App source revision."
 }
