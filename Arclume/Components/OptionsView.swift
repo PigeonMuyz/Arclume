@@ -23,6 +23,15 @@ struct OptionsView: View {
     @State private var showModeSelection = false
     @State private var patchErrorMessage: String?
 
+    @AppStorage(ArclumeUpdatePreferences.automaticallyCheck, store: UserDefaults(suiteName: suiteName))
+    private var automaticallyCheckUpdates = true
+    @AppStorage(ArclumeUpdatePreferences.checkAtEveryLaunch, store: UserDefaults(suiteName: suiteName))
+    private var checkUpdatesAtEveryLaunch = false
+    @AppStorage(ArclumeUpdatePreferences.mirrorMode, store: UserDefaults(suiteName: suiteName))
+    private var updateMirrorMode = ArclumeUpdateMirrorMode.automatic.rawValue
+    @AppStorage(ArclumeUpdatePreferences.customMirrorPrefix, store: UserDefaults(suiteName: suiteName))
+    private var customUpdateMirrorPrefix = ""
+
     @AppStorage("steamMetadataSource", store: UserDefaults(suiteName: suiteName))
     private var steamMetadataSource = SteamMetadataSource.steamStore.rawValue
     @AppStorage("appleAppStoreMetadataEnabled", store: UserDefaults(suiteName: suiteName))
@@ -33,6 +42,7 @@ struct OptionsView: View {
     @EnvironmentObject private var libraryPageGlobals: LibraryPageGlobals
     @EnvironmentObject private var containerSteamStore: ContainerSteamStore
     @EnvironmentObject private var modeStore: ArclumeModeStore
+    @EnvironmentObject private var updateService: ArclumeUpdateService
     @MainActor var load: @Sendable () async -> Void
 
     private var isOnlineMode: Bool {
@@ -96,6 +106,7 @@ struct OptionsView: View {
     private var onlineSettingsContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             modeSelectionCard
+            updateCard
             appearanceCard
             aboutCard
         }
@@ -107,6 +118,7 @@ struct OptionsView: View {
     private var standardSettingsContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             modeSelectionCard
+            updateCard
             settingsCard { crossOverSection }
             settingsCard { steamBottleSection }
             settingsCard { GameLibrariesList(load: load) }
@@ -174,6 +186,153 @@ struct OptionsView: View {
                 .pickerStyle(.menu)
             }
         }
+    }
+
+    private var updateCard: some View {
+        settingsCard {
+            HStack(spacing: 12) {
+                Text("更新")
+                    .font(.headline)
+                Spacer()
+                Button(updateService.isChecking ? "检查中…" : "检查更新") {
+                    Task { await updateService.checkForUpdates() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(updateService.isChecking)
+            }
+
+            updateItem(
+                title: "Arclume",
+                systemImage: "app.badge",
+                status: applicationUpdateStatus
+            ) {
+                if updateService.isApplicationUpdateAvailable {
+                    Button(updateService.isDownloadingApplication ? "下载中…" : "下载 DMG") {
+                        Task { await updateService.downloadApplicationUpdate() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(updateService.isDownloadingApplication)
+                }
+            }
+
+            if let message = updateService.applicationDownloadMessage {
+                updateMessage(message, color: .green)
+            }
+            if let message = updateService.applicationError {
+                updateMessage(message, color: .red)
+            }
+
+            Divider()
+                .overlay(.white.opacity(0.12))
+
+            updateItem(
+                title: "Arclume Wine",
+                systemImage: "wineglass",
+                status: runtimeUpdateStatus
+            ) {
+                if updateService.isRuntimeUpdateAvailable {
+                    Button(updateService.isUpdatingRuntime ? "更新中…" : "更新 Runtime") {
+                        Task { await updateService.updateRuntime() }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .disabled(
+                        updateService.isUpdatingRuntime
+                            || libraryPageGlobals.jx3RuntimeActivity.state != .idle
+                    )
+                }
+            }
+
+            if let progress = updateService.runtimeProgress,
+               let label = updateService.runtimeProgressLabel
+            {
+                ProgressView(value: progress) {
+                    Text(label)
+                }
+                .controlSize(.small)
+                .font(.footnote)
+            }
+            if let message = updateService.runtimeError {
+                updateMessage(message, color: .red)
+            }
+
+            Divider()
+                .overlay(.white.opacity(0.12))
+
+            Toggle("自动检查更新", isOn: $automaticallyCheckUpdates)
+            Toggle("每次启动检查", isOn: $checkUpdatesAtEveryLaunch)
+                .disabled(!automaticallyCheckUpdates)
+
+            HStack(spacing: 12) {
+                Label("下载源", systemImage: "arrow.triangle.2.circlepath")
+                    .foregroundStyle(.white.opacity(0.82))
+                Spacer(minLength: 8)
+                Picker("下载源", selection: $updateMirrorMode) {
+                    ForEach(ArclumeUpdateMirrorMode.allCases) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
+            }
+
+            if updateMirrorMode == ArclumeUpdateMirrorMode.customMirror.rawValue {
+                TextField("https://mirror.example/", text: $customUpdateMirrorPrefix)
+                    .textFieldStyle(.roundedBorder)
+                if !customUpdateMirrorPrefix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                   ArclumeUpdateSource.normalizedPrefix(customUpdateMirrorPrefix) == nil
+                {
+                    updateMessage("自定义下载源需使用 HTTPS URL 前缀。", color: .orange)
+                }
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.white.opacity(0.78))
+    }
+
+    private func updateItem<Action: View>(
+        title: String,
+        systemImage: String,
+        status: String,
+        @ViewBuilder action: () -> Action
+    ) -> some View {
+        HStack(spacing: 10) {
+            Label(title, systemImage: systemImage)
+                .foregroundStyle(.white.opacity(0.9))
+            Spacer(minLength: 6)
+            Text(status)
+                .foregroundStyle(.white.opacity(0.58))
+                .lineLimit(1)
+                .truncationMode(.middle)
+            action()
+        }
+    }
+
+    private func updateMessage(_ message: String, color: Color) -> some View {
+        Text(message)
+            .font(.footnote)
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var applicationUpdateStatus: String {
+        guard let release = updateService.latestApplicationRelease else {
+            return updateService.isChecking ? "正在检查" : "尚未检查"
+        }
+        return updateService.isApplicationUpdateAvailable
+            ? "\(release.version) 可用"
+            : "已是最新"
+    }
+
+    private var runtimeUpdateStatus: String {
+        guard let release = updateService.latestRuntimeRelease else {
+            return updateService.isChecking ? "正在检查" : "尚未检查"
+        }
+        return updateService.isRuntimeUpdateAvailable
+            ? "\(release.manifest.version) 可用"
+            : "已是最新"
     }
 
     private var aboutCard: some View {

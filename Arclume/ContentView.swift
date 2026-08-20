@@ -25,6 +25,7 @@ final class Router: ObservableObject {
 
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var updateService: ArclumeUpdateService
     @StateObject private var router = Router()
     @StateObject private var modeStore = ArclumeModeStore()
     @StateObject private var appGlobals = AppGlobals(
@@ -71,6 +72,9 @@ struct ContentView: View {
         )
         .onAppear {
             nativeRuntimeStore.reconcileRunningApplications()
+        }
+        .task {
+            await updateService.checkForUpdatesAtLaunch()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
