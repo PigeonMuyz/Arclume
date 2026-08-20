@@ -1,16 +1,16 @@
-# Procyon+
+# Arclume
 
-> 基于 [italomandara/Procyon](https://github.com/italomandara/Procyon) 的独立、非官方 macOS 游戏启动器分支。
+> 基于 [italomandara/Procyon](https://github.com/italomandara/Procyon) 的独立、非官方 macOS 游戏启动器。
 
 > 当前 `main` 分支定位为预发布版本：功能、界面和依赖仍可能调整，不代表稳定版或正式发行版。
 
 [简体中文](#简体中文) · [English](#english)
 
-![Procyon+](https://github.com/user-attachments/assets/6ed53e07-5a66-4ada-90d6-f6134e7a275b)
+![Arclume](https://github.com/user-attachments/assets/6ed53e07-5a66-4ada-90d6-f6134e7a275b)
 
 ## 简体中文
 
-Procyon+ 统一管理 macOS 原生游戏、Steam 原生游戏，以及由 CrossOver 运行的 Windows Steam 游戏。它不是上游 Procyon 的官方版本，也不代表或获得上游作者背书。
+Arclume 统一管理 macOS 原生游戏、Steam 原生游戏，以及由 CrossOver 或 Arclume Wine Runtime 运行的 Windows 游戏。它不是上游 Procyon 的官方版本，也不代表或获得上游作者背书。
 
 ### 主要功能
 
@@ -24,9 +24,9 @@ Procyon+ 统一管理 macOS 原生游戏、Steam 原生游戏，以及由 CrossO
 
 ### 与上游 Procyon 的差异
 
-| 范围 | Procyon+ |
+| 范围 | Arclume |
 | --- | --- |
-| 产品定位 | 独立的社区维护分支，不是上游正式版本。 |
+| 产品定位 | 独立维护的 Arclume 产品线，不是上游正式版本。 |
 | 原生游戏 | 支持扫描、导入、编辑和启动 macOS 原生游戏。 |
 | 元数据与封面 | 增加本地 Steam Store 代理、App Store 元数据与用户可选封面图。 |
 | 游戏库体验 | 支持多个 Steam Library、Steamworks 过滤、加载空态与更明确的平台状态。 |
@@ -34,15 +34,24 @@ Procyon+ 统一管理 macOS 原生游戏、Steam 原生游戏，以及由 CrossO
 | Rosetta x87 | 本分支不再捆绑或依赖 rosettaX87 运行时。 |
 | 开发方式 | 本分支新增修改允许 AI 辅助与 Vibe Coding；上游的“禁止提交 Vibe Coding 结果”规则不适用于本仓库，但仍适用于向上游提交代码。 |
 
+### 运行时仓库与版本
+
+应用和 Wine 运行时已拆分为两个 GitHub Private Repo：
+
+- `PigeonMuyz/Arclume`：应用 UI、瓶子管理、启动器和内嵌 Runtime Manifest。
+- `PigeonMuyz/Arclume-Runtime`：Wine 源码锁定、补丁、构建脚本、运行时 ABI 与发行 Manifest。
+
+App 首次发布仍内嵌已验证的 Runtime，以保障离线初始化；`Runtime.lock.json` 和 App 资源中的 Manifest 固定其版本、ABI、归档 SHA-256 与旧版迁移规则。Runtime 的公开版本遵循 `Arclume Wine 1.0.*`，不直接复用上游 Wine 版本号。
+
 ### 运行要求
 
-- macOS 26.2 或更高版本。
+- macOS 26.0 或更高版本。
 - 运行 Windows Steam 游戏时，需要自行安装 CrossOver，并在设置中选择 CrossOver App 与目标 bottle。
 - Steam 身份从本机原生 Steam 和当前 CrossOver bottle 的 `loginusers.vdf` 读取，只使用 SteamID、账户名、显示名与最近登录标记；不会读取密码、SSFN 或会话令牌。
 
 ### Steam Store 元数据
 
-默认情况下，Procyon+ 会直接请求公开的 Steam Store API 获取描述、封面和平台元数据，并在请求失败时回退到本地 manifest 或缓存。该请求不需要 Steam 登录凭据。
+默认情况下，Arclume 会直接请求公开的 Steam Store API 获取描述、封面和平台元数据，并在请求失败时回退到本地 manifest 或缓存。该请求不需要 Steam 登录凭据。
 
 如需调试或通过本地适配器转发请求，也可以在仓库根目录运行：
 
@@ -60,7 +69,7 @@ xcodebuild -project Procyon.xcodeproj -scheme Procyon -configuration Debug build
 
 ### AI / Vibe Coding 与贡献说明
 
-Procyon+ 是一个 AI 辅助开发分支：本分支新增修改可以采用 Vibe Coding 工作流。提交前仍应阅读受影响代码、说明改动来源，并提供可复现的手动验证结果。
+Arclume 是一个 AI 辅助开发项目：本项目新增修改可以采用 Vibe Coding 工作流。提交前仍应阅读受影响代码、说明改动来源，并提供可复现的手动验证结果。
 
 上游 Procyon 明确不接受 Vibe Coding 结果。请不要将本仓库的 AI 辅助修改原样提交到上游；如需上游贡献，必须先按上游规则独立审查、重构和验证。
 
@@ -74,7 +83,7 @@ Procyon+ 是一个 AI 辅助开发分支：本分支新增修改可以采用 Vib
 
 ## English
 
-Procyon+ is an independent, unofficial macOS game-launcher fork of [italomandara/Procyon](https://github.com/italomandara/Procyon). It manages native macOS games, native Steam games, and Windows Steam games run through CrossOver. It is not an official upstream release and is not endorsed by the upstream author.
+Arclume is an independent, unofficial macOS game launcher based on [italomandara/Procyon](https://github.com/italomandara/Procyon). It manages native macOS games, native Steam games, and Windows games run through CrossOver or Arclume Wine Runtime. It is not an official upstream release and is not endorsed by the upstream author.
 
 The `main` branch is currently a pre-release line. Features, UI, and dependencies may change before a stable or formal release.
 
@@ -90,19 +99,23 @@ The `main` branch is currently a pre-release line. Features, UI, and dependencie
 
 ### How this fork differs from upstream
 
-Procyon+ adds native game management, multi-library improvements, metadata and artwork workflows, explicit runtime status, a selective backport of CrossOver launch/Steam Cloud handling, and removes the bundled rosettaX87 runtime dependency.
+Arclume adds native game management, multi-library improvements, metadata and artwork workflows, explicit runtime status, a selective backport of CrossOver launch/Steam Cloud handling, and removes the bundled rosettaX87 runtime dependency.
 
 This fork accepts AI-assisted and Vibe Coding contributions. Upstream Procyon does not accept Vibe Coding results, so changes from this repository must not be submitted upstream unchanged; they require an independent upstream-compliant review, rewrite, and validation.
 
+### Runtime repositories
+
+`PigeonMuyz/Arclume` owns the App, launcher integration and bundled Runtime Manifest. `PigeonMuyz/Arclume-Runtime` owns Wine source locks, patches, build scripts, ABI and release manifests. The App embeds a tested runtime for first-run/offline setup, while `Runtime.lock.json` pins the selected private Runtime release.
+
 ### Requirements
 
-- macOS 26.2 or later.
+- macOS 26.0 or later.
 - CrossOver is required for Windows Steam games and must be selected with a target bottle in Settings.
-- Steam identities are discovered from `loginusers.vdf` in native Steam and the current CrossOver bottle. Procyon+ only uses the SteamID, account/display names, and recent-login flags; it never reads passwords, SSFN files, or session tokens.
+- Steam identities are discovered from `loginusers.vdf` in native Steam and the current CrossOver bottle. Arclume only uses the SteamID, account/display names, and recent-login flags; it never reads passwords, SSFN files, or session tokens.
 
 ### Steam Store metadata
 
-Procyon+ directly requests the public Steam Store API by default, with local-manifest and stale-cache fallback. These requests do not require Steam credentials.
+Arclume directly requests the public Steam Store API by default, with local-manifest and stale-cache fallback. These requests do not require Steam credentials.
 
 For debugging or local request adaptation, the optional loopback proxy remains available:
 

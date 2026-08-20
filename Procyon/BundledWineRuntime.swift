@@ -3,6 +3,7 @@
 //  Procyon
 //
 
+import CryptoKit
 import Foundation
 
 /// The online-game setup flow stores its runtime choice separately from the
@@ -30,7 +31,7 @@ enum OnlineGameRuntimeKind: String, CaseIterable, Identifiable, Sendable {
     var launcherTitle: String {
         switch self {
         case .crossOver: "CrossOver Patched"
-        case .bundledWine: "Procyon+ Wine（Beta）"
+        case .bundledWine: "Arclume Wine"
         }
     }
 
@@ -41,9 +42,9 @@ enum OnlineGameRuntimeKind: String, CaseIterable, Identifiable, Sendable {
     var detail: String {
         switch self {
         case .crossOver:
-            "使用你选择的 CrossOver.app；Procyon 只为它配置随 App 附带的依赖。"
+            "使用你选择的 CrossOver.app；Arclume 只为它配置随 App 附带的依赖。"
         case .bundledWine:
-            "使用 Procyon 内置的自编译 Wine，首次会解压到应用支持目录并建立独立 Games 容器。"
+            "使用 Arclume 内置的自编译 Wine，首次会解压到应用支持目录并建立独立 Games 容器。"
         }
     }
 
@@ -230,9 +231,10 @@ enum OnlineGameRuntimeKind: String, CaseIterable, Identifiable, Sendable {
 
 enum BundledWineRuntimeError: LocalizedError {
     case missingArchive
-    case missingVersionMarker
+    case missingManifest
     case invalidRuntime
     case runtimeVersionMismatch(String?)
+    case archiveChecksumMismatch
     case invalidPrefix
     case extractionFailed(Int32)
     case prefixInitializationFailed(Int32)
@@ -240,9 +242,9 @@ enum BundledWineRuntimeError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingArchive:
-            "App 内未找到自编译 Wine 运行时归档。"
-        case .missingVersionMarker:
-            "App 内未找到内置 Wine 运行时版本标记。"
+            "App 内未找到 Arclume Wine 运行时归档。"
+        case .missingManifest:
+            "App 内未找到 Arclume Wine Runtime Manifest。"
         case .invalidRuntime:
             "内置 Wine 运行时不完整，无法启动。"
         case .runtimeVersionMismatch(let installedVersion):
@@ -251,6 +253,8 @@ enum BundledWineRuntimeError: LocalizedError {
             } else {
                 "内置 Wine 缺少版本标记，无法确认其是否与当前 App 匹配。"
             }
+        case .archiveChecksumMismatch:
+            "内置 Wine 运行时归档校验失败。请重新安装 App 后再试。"
         case .invalidPrefix:
             "内置 Wine 的 Games 容器不完整。请勿手动删除其中的注册表文件。"
         case .extractionFailed(let status):
@@ -262,29 +266,61 @@ enum BundledWineRuntimeError: LocalizedError {
 }
 
 /// Keeps the bundled runtime immutable after extraction. D3DMetal remains in
-/// the existing versioned archives and is selected through PROCYON_DLL_PATH,
-/// so switching D3DMetal 3/4 never mutates this runtime or CrossOver.
+/// the existing versioned archives and is selected by prepending its Wine
+/// module directory to WINEDLLPATH, so switching D3DMetal 3/4 never mutates
+/// this runtime or CrossOver.
 enum BundledWineRuntime {
     typealias ProgressHandler = @Sendable (_ fraction: Double, _ label: String) -> Void
 
     struct LaunchConfiguration {
         let wineURL: URL
+        let runtimeURL: URL
         let environment: [String: String]
     }
 
-    nonisolated static let archiveName = "procyon-wine-runtime-x86_64-v8-mono.tar.xz"
-    nonisolated static let archiveRootName = "procyon-wine-runtime-x86_64-v8-mono-d3dmetal4-zhcn"
-    nonisolated static let versionResourceName = "procyon-wine-runtime-version.txt"
-    nonisolated static let versionMarkerFileName = ".procyon-runtime-version"
+    /// Fallbacks only make diagnostics and file locations stable when a
+    /// damaged App bundle is missing its manifest. Installation itself always
+    /// loads and validates the Manifest before touching Application Support.
+    nonisolated private static let fallbackManifest = ArclumeRuntimeManifest(
+        schemaVersion: 1,
+        id: "io.arclume.runtime.wine",
+        displayName: "Arclume Wine",
+        version: "未知版本",
+        channel: "stable",
+        runtimeABI: 1,
+        prefixABI: "arclume-jx3-prefix-1",
+        architecture: "x86_64",
+        minimumMacOS: "26.0",
+        legacyInstallRoots: [],
+        legacyInstallMarkers: [],
+        archive: .init(
+            name: "arclume-wine-runtime.tar.xz",
+            sha256: String(repeating: "0", count: 64),
+            rootDirectory: "arclume-wine-runtime-x86_64"
+        )
+    )
+    nonisolated static let versionMarkerFileName = ".arclume-runtime-version"
     nonisolated static let dockApplicationName = "剑网3旗舰版"
+
+    nonisolated static var manifest: ArclumeRuntimeManifest {
+        (try? requiredRuntimeManifest()) ?? fallbackManifest
+    }
+
+    nonisolated static var archiveName: String { manifest.archive.name }
+    nonisolated static var archiveRootName: String { manifest.archive.rootDirectory }
 
     /// Kept outside the disposable staging prefix so a failed first-run can be
     /// diagnosed after the staging directory is cleaned up.
     nonisolated static var prefixInitializationLogURL: URL {
-        FileManager.default.urls(for: .libraryDirectory, in: .userDomainMask)
-            .first!
-            .appendingPathComponent("Logs/Procyon", isDirectory: true)
+        prefixInitializationDiagnosticsDirectoryURL
             .appendingPathComponent("内置 Wine 初始化.log", isDirectory: false)
+    }
+
+    /// A self-contained location the Debug build can hand to a tester. It is
+    /// intentionally outside the disposable staging prefix, so an init crash
+    /// cannot remove the evidence needed to diagnose it.
+    nonisolated static var prefixInitializationDiagnosticsDirectoryURL: URL {
+        ProcyonGameLogStore.directoryURL
     }
 
     private static let installationLock = NSLock()
@@ -302,7 +338,7 @@ enum BundledWineRuntime {
     }
 
     nonisolated static var runtimeVersion: String {
-        (try? requiredRuntimeVersion()) ?? "未知版本"
+        manifest.version
     }
 
     nonisolated static func ownsPrefix(_ bottleURL: URL) -> Bool {
@@ -337,8 +373,50 @@ enum BundledWineRuntime {
         expectedVersion: String? = nil
     ) -> Bool {
         guard isValidRuntime(at: runtimeURL) else { return false }
-        let expected = expectedVersion ?? (try? requiredRuntimeVersion())
+        let expected = expectedVersion ?? (try? requiredRuntimeManifest().version)
         return expected != nil && installedRuntimeVersion(at: runtimeURL) == expected
+    }
+
+    /// Indicates that the runtime can be updated in place without rebuilding
+    /// the existing Games container. This deliberately requires both sides to
+    /// be valid: a damaged runtime or prefix must still go through repair.
+    nonisolated static func requiresRuntimeUpdate(
+        runtimeURL: URL,
+        prefixURL: URL,
+        expectedVersion: String? = nil
+    ) -> Bool {
+        isValidRuntime(at: runtimeURL)
+            && isValidPrefix(at: prefixURL)
+            && !isCurrentRuntime(
+                at: runtimeURL,
+                expectedVersion: expectedVersion
+            )
+    }
+
+    /// The final Procyon runtime was installed under a different directory
+    /// name. Treat it as an update candidate so existing users see the short
+    /// Runtime-updater sheet instead of first-run onboarding.
+    nonisolated static func hasMigratableLegacyInstallation() -> Bool {
+        guard let manifest = try? requiredRuntimeManifest(),
+              !FileManager.default.fileExists(atPath: installationURL.path)
+        else {
+            return false
+        }
+        return recognizedLegacyInstallation(manifest: manifest) != nil
+    }
+
+    nonisolated static func pendingLegacyRuntimeVersion() -> String? {
+        guard let manifest = try? requiredRuntimeManifest(),
+              let legacyURL = recognizedLegacyInstallation(manifest: manifest)
+        else {
+            return nil
+        }
+        let markerURL = legacyURL.appendingPathComponent(
+            ".procyon-runtime-version",
+            isDirectory: false
+        )
+        return (try? String(contentsOf: markerURL, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     nonisolated static func isValidPrefix(at bottleURL: URL = prefixURL) -> Bool {
@@ -364,7 +442,9 @@ enum BundledWineRuntime {
         progress?(0.02, "正在检查内置 Wine 运行时…")
         installationLock.lock()
         defer { installationLock.unlock() }
-        let expectedVersion = try requiredRuntimeVersion()
+        let manifest = try requiredRuntimeManifest()
+        let expectedVersion = manifest.version
+        try migrateLegacyInstallationIfNeeded(manifest: manifest)
 
         if FileManager.default.fileExists(atPath: installationURL.path) {
             guard isValidRuntime() else { throw BundledWineRuntimeError.invalidRuntime }
@@ -375,8 +455,13 @@ enum BundledWineRuntime {
             progress?(0.05, "正在更新内置 Wine \(expectedVersion)…")
         }
 
-        guard let archiveURL = BundledOnlineGameResources.resourceURL(named: archiveName) else {
+        guard let archiveURL = BundledOnlineGameResources.resourceURL(
+            named: manifest.archive.name
+        ) else {
             throw BundledWineRuntimeError.missingArchive
+        }
+        guard try archiveSHA256(at: archiveURL) == manifest.archive.sha256 else {
+            throw BundledWineRuntimeError.archiveChecksumMismatch
         }
 
         let fileManager = FileManager.default
@@ -386,7 +471,7 @@ enum BundledWineRuntime {
         let archiveEntryCount = try archiveEntryCount(in: archiveURL)
 
         let stagingURL = parentURL.appendingPathComponent(
-            ".\(archiveRootName)-\(UUID().uuidString)",
+            ".\(manifest.archive.rootDirectory)-\(UUID().uuidString)",
             isDirectory: true
         )
         try fileManager.createDirectory(at: stagingURL, withIntermediateDirectories: true)
@@ -399,7 +484,7 @@ enum BundledWineRuntime {
         )
 
         let extractedRuntimeURL = stagingURL.appendingPathComponent(
-            archiveRootName,
+            manifest.archive.rootDirectory,
             isDirectory: true
         )
         progress?(0.94, "正在校验解压后的 Wine 运行时…")
@@ -451,16 +536,23 @@ enum BundledWineRuntime {
         defer { try? fileManager.removeItem(at: stagingPrefixURL) }
 
         progress?(0.66, "正在准备 D3DMetal 和 Wine 环境…")
+        let graphicsBackend = OnlineGameMode.defaultGraphicsBackend
         let configuration = try makeLaunchConfiguration(
             runtimeURL: runtimeURL,
-            graphicsBackend: OnlineGameMode.defaultGraphicsBackend,
-            d3dMetal4Enabled: true,
+            graphicsBackend: graphicsBackend,
+            d3dMetal4Enabled: graphicsBackend == "d3dmetal4",
             mtlHudEnabled: false,
             wineMSync: true
         )
         var environment = configuration.environment
         environment["WINEPREFIX"] = stagingPrefixURL.path
         environment["WINEARCH"] = "win64"
+        // A Wine server/SEH trace can grow to several gigabytes during a
+        // normal game session. It is opt-in even for Debug builds so user
+        // diagnostics always remain bounded by Procyon's log retention.
+        if verboseWineTraceRequested {
+            environment["WINEDEBUG"] = "-all,+timestamp,+pid,+tid,+server,+seh"
+        }
 
         progress?(0.74, "正在创建独立的 Games 容器…")
         let initializationLogHandle = try resetPrefixInitializationLog(
@@ -509,7 +601,6 @@ enum BundledWineRuntime {
             "前缀文件：drive_c=\(hasDriveC) system.reg=\(hasSystemRegistry) user.reg=\(hasUserRegistry)",
             to: initializationLogHandle
         )
-
         if waitForValidPrefix(at: stagingPrefixURL) { fraction in
             progress?(0.78 + fraction * 0.17, "正在初始化 Windows 注册表和驱动器…")
         } {
@@ -522,6 +613,9 @@ enum BundledWineRuntime {
             try fileManager.moveItem(at: stagingPrefixURL, to: prefixURL)
             progress?(1, "内置 Wine 与 Games 容器已准备完成")
             return prefixURL
+        }
+        if process.terminationReason == .uncaughtSignal {
+            copyRecentWineCrashReports(to: initializationLogHandle)
         }
         throw BundledWineRuntimeError.prefixInitializationFailed(process.terminationStatus)
     }
@@ -563,23 +657,19 @@ enum BundledWineRuntime {
 
         var environment = ProcessInfo.processInfo.environment
         environment["WINEDATADIR"] = runtimeURL.appendingPathComponent("share/wine").path
-        environment["WINEDLLPATH"] = runtimeURL.appendingPathComponent("lib/wine").path
         environment["WINESERVER"] = runtimeURL.appendingPathComponent("bin/wineserver").path
-        environment["PROCYON_DLL_PATH"] = graphicsWineURL.path
-        environment["DYLD_FALLBACK_LIBRARY_PATH"] = [
-            graphicsRootURL.path,
-            runtimeURL.appendingPathComponent("lib64").path
-        ].joined(separator: ":")
+        environment.merge(
+            graphicsRuntimeEnvironment(
+                runtimeURL: runtimeURL,
+                graphicsRootURL: graphicsRootURL,
+                graphicsWineURL: graphicsWineURL,
+                graphicsBackend: graphicsBackend,
+                d3dMetal4Enabled: d3dMetal4Enabled
+            ),
+            uniquingKeysWith: { _, new in new }
+        )
         environment["WINEDEBUG"] = "-all"
         environment["WINEMSYNC"] = wineMSync ? "1" : "0"
-        environment["CX_GRAPHICS_BACKEND"] = graphicsBackend.contains("d3dmetal")
-            ? "d3dmetal"
-            : graphicsBackend
-        environment["D3DM_MTL4"] = d3dMetal4Enabled ? "1" : "0"
-        environment["D3DM_ENABLE_METALFX"] = "1"
-        environment["DXMT_ENABLE_NVEXT"] = "1"
-        environment["MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS"] = "1"
-        environment["MVK_CONFIG_LOG_LEVEL"] = "0"
         environment["ROSETTA_ADVERTISE_AVX"] = "1"
         environment["PROCYON_NO_GPFAULT_ERROR_DIALOG"] = "1"
         environment["PROCYON_WINE_DOCK_NAME"] = dockApplicationName
@@ -590,22 +680,120 @@ enum BundledWineRuntime {
 
         return LaunchConfiguration(
             wineURL: runtimeURL.appendingPathComponent("lib/wine/x86_64-unix/wine"),
+            runtimeURL: runtimeURL,
             environment: environment
         )
     }
 
-    nonisolated private static func requiredRuntimeVersion() throws -> String {
-        guard let versionURL = BundledOnlineGameResources.resourceURL(
-            named: versionResourceName
-        ), let value = try? String(contentsOf: versionURL, encoding: .utf8)
-        else {
-            throw BundledWineRuntimeError.missingVersionMarker
+    /// Direct Wine does not consume Procyon's legacy DLL-path marker. Its
+    /// loader only honours WINEDLLPATH, so D3DMetal must be first in that
+    /// search path for its d3d11/dxgi modules to replace Wine's built-ins.
+    /// Keep the Wine runtime second so all non-D3DMetal modules remain intact.
+    nonisolated static func graphicsRuntimeEnvironment(
+        runtimeURL: URL,
+        graphicsRootURL: URL,
+        graphicsWineURL: URL,
+        graphicsBackend: String,
+        d3dMetal4Enabled: Bool
+    ) -> [String: String] {
+        let wineModulePath = runtimeURL.appendingPathComponent("lib/wine").path
+        let usesD3DMetal = graphicsBackend.contains("d3dmetal")
+        let activeBackend = usesD3DMetal ? "d3dmetal" : graphicsBackend
+        let wineDLLPath = usesD3DMetal
+            ? [graphicsWineURL.path, wineModulePath].joined(separator: ":")
+            : wineModulePath
+        let fallbackLibraries = usesD3DMetal
+            ? [
+                graphicsRootURL.appendingPathComponent("external").path,
+                graphicsRootURL.path,
+                runtimeURL.appendingPathComponent("lib64").path
+            ]
+            : [runtimeURL.appendingPathComponent("lib64").path]
+
+        return [
+            "WINEDLLPATH": wineDLLPath,
+            // Retained in diagnostic logs and for existing user tooling. Wine
+            // itself selects the modules through WINEDLLPATH above.
+            "PROCYON_DLL_PATH": usesD3DMetal ? graphicsWineURL.path : "",
+            // d3d11.so/dxgi.so resolve libd3dshared.dylib from this directory.
+            "DYLD_FALLBACK_LIBRARY_PATH": fallbackLibraries.joined(separator: ":"),
+            "CX_GRAPHICS_BACKEND": activeBackend,
+            // CrossOver normally derives this through cxcompatdb. The bundled
+            // runtime launches Wine directly, so provide the final value.
+            "CX_ACTIVE_GRAPHICS_BACKEND": activeBackend,
+            "D3DM_MTL4": d3dMetal4Enabled ? "1" : "0",
+            "D3DM_ENABLE_METALFX": "1",
+            "DXMT_ENABLE_NVEXT": "1",
+            "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS": "1",
+            "MVK_CONFIG_LOG_LEVEL": "0"
+        ]
+    }
+
+    nonisolated private static func requiredRuntimeManifest() throws -> ArclumeRuntimeManifest {
+        do {
+            return try ArclumeRuntimeManifest.load()
+        } catch ArclumeRuntimeManifestError.missing {
+            throw BundledWineRuntimeError.missingManifest
         }
-        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else {
-            throw BundledWineRuntimeError.missingVersionMarker
+    }
+
+    /// Retain existing users' already-extracted Wine 11 runtime when it is
+    /// exactly the final Procyon build we shipped. This is a rename within the
+    /// same Application Support volume, so it neither copies the runtime nor
+    /// consumes an additional 136 MB of storage.
+    nonisolated private static func migrateLegacyInstallationIfNeeded(
+        manifest: ArclumeRuntimeManifest
+    ) throws {
+        let currentURL = installationURL
+        let fileManager = FileManager.default
+        guard !fileManager.fileExists(atPath: currentURL.path),
+              let legacyURL = recognizedLegacyInstallation(manifest: manifest)
+        else { return }
+
+        try fileManager.createDirectory(
+            at: currentURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try fileManager.moveItem(at: legacyURL, to: currentURL)
+        try manifest.version.appending("\n").write(
+            to: currentURL.appendingPathComponent(versionMarkerFileName),
+            atomically: true,
+            encoding: .utf8
+        )
+        try? fileManager.removeItem(at: currentURL.appendingPathComponent(
+            ".procyon-runtime-version"
+        ))
+    }
+
+    nonisolated private static func recognizedLegacyInstallation(
+        manifest: ArclumeRuntimeManifest
+    ) -> URL? {
+        let parentURL = installationURL.deletingLastPathComponent()
+        for rootName in manifest.legacyInstallRoots {
+            let legacyURL = parentURL.appendingPathComponent(rootName, isDirectory: true)
+            guard isValidRuntime(at: legacyURL) else { continue }
+            let markerURL = legacyURL.appendingPathComponent(
+                ".procyon-runtime-version",
+                isDirectory: false
+            )
+            let marker = (try? String(contentsOf: markerURL, encoding: .utf8))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let marker, manifest.legacyInstallMarkers.contains(marker) {
+                return legacyURL
+            }
         }
-        return normalized
+        return nil
+    }
+
+    nonisolated private static func archiveSHA256(at archiveURL: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: archiveURL)
+        defer { try? handle.close() }
+
+        var hasher = SHA256()
+        while let data = try handle.read(upToCount: 1_048_576), !data.isEmpty {
+            hasher.update(data: data)
+        }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     nonisolated private static func resetPrefixInitializationLog(
@@ -613,18 +801,18 @@ enum BundledWineRuntime {
         stagingPrefixURL: URL,
         environment: [String: String]
     ) throws -> FileHandle {
-        let fileManager = FileManager.default
         let logURL = prefixInitializationLogURL
-        try fileManager.createDirectory(
-            at: logURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        _ = ProcyonGameLogStore.directoryForUser()
+        ProcyonGameLogStore.enforceStorageLimit()
         try Data().write(to: logURL, options: .atomic)
         let handle = try FileHandle(forWritingTo: logURL)
-        try writePrefixInitializationLog("Procyon 内置 Wine 前缀初始化诊断", to: handle)
+        try writePrefixInitializationLog("Arclume 内置 Wine 前缀初始化诊断", to: handle)
+        try writePrefixInitializationLog("构建类型：\(buildFlavor)", to: handle)
+        try writePrefixInitializationLog("App：\(Bundle.main.bundleIdentifier ?? "<未知>") \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "<未知>")", to: handle)
         try writePrefixInitializationLog("时间：\(ISO8601DateFormatter().string(from: Date()))", to: handle)
         try writePrefixInitializationLog("macOS：\(ProcessInfo.processInfo.operatingSystemVersionString)", to: handle)
         try writePrefixInitializationLog("运行时：\(runtimeURL.path)", to: handle)
+        try writePrefixInitializationLog("运行时版本：\(installedRuntimeVersion(at: runtimeURL) ?? "<缺失>")", to: handle)
         try writePrefixInitializationLog("临时 Games 容器：\(stagingPrefixURL.path)", to: handle)
         for key in [
             "WINEPREFIX",
@@ -636,6 +824,7 @@ enum BundledWineRuntime {
             "DYLD_FALLBACK_LIBRARY_PATH",
             "WINEMSYNC",
             "CX_GRAPHICS_BACKEND",
+            "CX_ACTIVE_GRAPHICS_BACKEND",
             "D3DM_MTL4",
             "ROSETTA_ADVERTISE_AVX",
             "MTL_HUD_ENABLED"
@@ -646,8 +835,211 @@ enum BundledWineRuntime {
                 to: handle
             )
         }
+        appendRuntimeBinaryDiagnostics(runtimeURL: runtimeURL, to: handle)
         handle.synchronizeFile()
         return handle
+    }
+
+    nonisolated private static var buildFlavor: String {
+#if DEBUG
+        "Debug"
+#else
+        "Release"
+#endif
+    }
+
+    /// Verbose Wine tracing is intentionally an internal, explicit opt-in.
+    /// The normal Debug app is shared with testers, where tracing every Wine
+    /// server message would otherwise make a multi-gigabyte log file.
+    nonisolated static var verboseWineTraceRequested: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.environment["PROCYON_ENABLE_WINE_TRACE"] == "1"
+#else
+        false
+#endif
+    }
+
+    /// Capture executable metadata before wineboot starts. This makes reports
+    /// from a different macOS build actionable even when the process crashes
+    /// before Wine can emit a normal debug line.
+    nonisolated static func appendLauncherDiagnostics(
+        runtimeURL: URL,
+        wineURL: URL,
+        executableURL: URL,
+        arguments: [String],
+        environment: [String: String],
+        to handle: FileHandle
+    ) {
+        try? writePrefixInitializationLog("Arclume 内置 Wine 启动器调试", to: handle)
+        try? writePrefixInitializationLog(
+            "启动命令：\(wineURL.path) \(executableURL.path) \(arguments.joined(separator: " "))",
+            to: handle
+        )
+        for key in [
+            "WINEPREFIX",
+            "WINEDATADIR",
+            "WINEDLLPATH",
+            "WINESERVER",
+            "PROCYON_DLL_PATH",
+            "DYLD_FALLBACK_LIBRARY_PATH",
+            "WINEDEBUG",
+            "WINEMSYNC",
+            "CX_GRAPHICS_BACKEND",
+            "CX_ACTIVE_GRAPHICS_BACKEND",
+            "D3DM_MTL4",
+            "ROSETTA_ADVERTISE_AVX"
+        ] {
+            try? writePrefixInitializationLog(
+                "环境 \(key)=\(environment[key] ?? "<未设置>")",
+                to: handle
+            )
+        }
+        appendRuntimeBinaryDiagnostics(runtimeURL: runtimeURL, to: handle)
+        handle.synchronizeFile()
+    }
+
+    nonisolated static func appendRuntimeBinaryDiagnostics(
+        runtimeURL: URL,
+        to handle: FileHandle
+    ) {
+        appendDiagnosticCommand(
+            executableURL: URL(fileURLWithPath: "/usr/bin/sw_vers"),
+            label: "sw_vers",
+            to: handle
+        )
+        appendDiagnosticCommand(
+            executableURL: URL(fileURLWithPath: "/usr/bin/uname"),
+            arguments: ["-m"],
+            label: "uname -m",
+            to: handle
+        )
+        appendDiagnosticCommand(
+            executableURL: URL(fileURLWithPath: "/usr/sbin/sysctl"),
+            arguments: ["-n", "sysctl.proc_translated"],
+            label: "Rosetta 状态",
+            to: handle
+        )
+
+        for binaryURL in [
+            runtimeURL.appendingPathComponent("lib/wine/x86_64-unix/wine"),
+            runtimeURL.appendingPathComponent("bin/wineserver"),
+            runtimeURL.appendingPathComponent("lib/wine/x86_64-unix/ntdll.so")
+        ] {
+            appendDiagnosticCommand(
+                executableURL: URL(fileURLWithPath: "/usr/bin/file"),
+                arguments: [binaryURL.path],
+                label: "file \(binaryURL.lastPathComponent)",
+                to: handle
+            )
+            appendDiagnosticCommand(
+                executableURL: URL(fileURLWithPath: "/usr/bin/xcrun"),
+                arguments: ["vtool", "-show-build", binaryURL.path],
+                label: "vtool \(binaryURL.lastPathComponent)",
+                to: handle
+            )
+            appendDiagnosticCommand(
+                executableURL: URL(fileURLWithPath: "/usr/bin/otool"),
+                arguments: ["-L", binaryURL.path],
+                label: "otool \(binaryURL.lastPathComponent)",
+                to: handle
+            )
+            appendDiagnosticCommand(
+                executableURL: URL(fileURLWithPath: "/usr/bin/codesign"),
+                arguments: ["-dvv", binaryURL.path],
+                label: "codesign \(binaryURL.lastPathComponent)",
+                to: handle
+            )
+        }
+    }
+
+    nonisolated private static func appendDiagnosticCommand(
+        executableURL: URL,
+        arguments: [String] = [],
+        label: String,
+        to handle: FileHandle
+    ) {
+        let process = Process()
+        let standardOutput = Pipe()
+        let standardError = Pipe()
+        process.executableURL = executableURL
+        process.arguments = arguments
+        process.standardOutput = standardOutput
+        process.standardError = standardError
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let output = standardOutput.fileHandleForReading.readDataToEndOfFile()
+            let error = standardError.fileHandleForReading.readDataToEndOfFile()
+            let contents = String(data: output + error, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? "<无输出>"
+            try? writePrefixInitializationLog(
+                "[\(label)] status=\(process.terminationStatus)\n\(contents)",
+                to: handle
+            )
+        } catch {
+            try? writePrefixInitializationLog(
+                "[\(label)] 无法执行：\(error.localizedDescription)",
+                to: handle
+            )
+        }
+    }
+
+    /// macOS generally writes the .ips file after a signal-terminated child
+    /// exits. The prefix validation wait below gives crash reporting time to
+    /// flush; copy any matching recent report beside Procyon's own log.
+    nonisolated static func copyRecentWineCrashReports(to handle: FileHandle) {
+        defer { ProcyonGameLogStore.enforceStorageLimit() }
+        let fileManager = FileManager.default
+        let reportsURL = FileManager.default.urls(
+            for: .libraryDirectory,
+            in: .userDomainMask
+        ).first!
+        .appendingPathComponent("Logs/DiagnosticReports", isDirectory: true)
+        guard let reports = try? fileManager.contentsOfDirectory(
+            at: reportsURL,
+            includingPropertiesForKeys: [.contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            try? writePrefixInitializationLog("未找到 macOS 崩溃报告目录。", to: handle)
+            return
+        }
+        let cutoff = Date().addingTimeInterval(-120)
+        let candidates = reports.filter { reportURL in
+            let name = reportURL.lastPathComponent.lowercased()
+            guard name.contains("wine") || name.contains("wineserver") else {
+                return false
+            }
+            let modified = (try? reportURL.resourceValues(
+                forKeys: [.contentModificationDateKey]
+            ).contentModificationDate) ?? .distantPast
+            return modified >= cutoff
+        }
+        guard !candidates.isEmpty else {
+            try? writePrefixInitializationLog(
+                "尚未找到本次 wine/wineserver 的 macOS 崩溃报告。",
+                to: handle
+            )
+            return
+        }
+        for reportURL in candidates {
+            let destinationURL = prefixInitializationDiagnosticsDirectoryURL
+                .appendingPathComponent("崩溃报告-\(reportURL.lastPathComponent)")
+            do {
+                if fileManager.fileExists(atPath: destinationURL.path) {
+                    try fileManager.removeItem(at: destinationURL)
+                }
+                try fileManager.copyItem(at: reportURL, to: destinationURL)
+                try writePrefixInitializationLog(
+                    "已收集 macOS 崩溃报告：\(destinationURL.path)",
+                    to: handle
+                )
+            } catch {
+                try? writePrefixInitializationLog(
+                    "无法收集崩溃报告 \(reportURL.lastPathComponent)：\(error.localizedDescription)",
+                    to: handle
+                )
+            }
+        }
     }
 
     nonisolated private static func writePrefixInitializationLog(

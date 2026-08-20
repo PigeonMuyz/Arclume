@@ -294,7 +294,7 @@ struct GameThumbnail: View {
                 Button(role: .destructive) {
                     showRemoveConfirmation = true
                 } label: {
-                    Label(L10n.string("Remove from Procyon+"), systemImage: "trash")
+                    Label(L10n.string("Remove from Arclume"), systemImage: "trash")
                 }
             }
         }
@@ -344,7 +344,7 @@ struct GameThumbnail: View {
             Text(libraryPageGlobals.launchErrorMessage ?? "")
         }
         .confirmationDialog(
-            L10n.format("Remove %@ from Procyon?", displayName),
+            L10n.format("Remove %@ from Arclume?", displayName),
             isPresented: $showRemoveConfirmation,
             titleVisibility: .visible
         ) {
@@ -353,7 +353,7 @@ struct GameThumbnail: View {
             }
             Button(L10n.string("Cancel"), role: .cancel) { }
         } message: {
-            Text(L10n.string("This only removes the game from Procyon and does not delete its app or files."))
+            Text(L10n.string("This only removes the game from Arclume and does not delete its app or files."))
         }
         .task(id: coverURL?.absoluteString) {
             coverDidLoad = false

@@ -21,6 +21,7 @@ struct LibraryPage: View {
     @State private var loadGeneration = 0
     @State private var metadataRefreshTask: Task<Void, Never>?
     @State private var showOnlineSetupGuide = false
+    @State private var showOnlineRuntimeUpdate = false
     @State private var didOfferOnlineSetupGuide = false
     @State private var jx3LaunchMonitor: Task<Void, Never>?
     
@@ -136,6 +137,12 @@ struct LibraryPage: View {
                     load: load
                 )
             }
+            .sheet(isPresented: $showOnlineRuntimeUpdate) {
+                OnlineGameRuntimeUpdateView(
+                    isPresented: $showOnlineRuntimeUpdate,
+                    load: load
+                )
+            }
             .sheet(isPresented: $libraryPageGlobals.showTools) {
                 ToolsView(load: load)
             }
@@ -204,11 +211,18 @@ struct LibraryPage: View {
                     return
                 }
                 if OnlineGameMode.isEnabled,
-                   !didOfferOnlineSetupGuide,
-                   !OnlineGameSetupStatus.isComplete(appGlobals: appGlobals) {
+                   !didOfferOnlineSetupGuide {
                     didOfferOnlineSetupGuide = true
                     DispatchQueue.main.async {
-                        showOnlineSetupGuide = true
+                        if OnlineGameSetupStatus.requiresBundledWineRuntimeUpdate(
+                            appGlobals: appGlobals
+                        ) {
+                            showOnlineRuntimeUpdate = true
+                        } else if !OnlineGameSetupStatus.isComplete(
+                            appGlobals: appGlobals
+                        ) {
+                            showOnlineSetupGuide = true
+                        }
                     }
                 }
                 Task(priority: .background) {

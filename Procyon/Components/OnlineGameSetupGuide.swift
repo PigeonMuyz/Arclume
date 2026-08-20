@@ -42,6 +42,158 @@ enum OnlineGameSetupStatus {
         ) == .orderedSame
             && OnlineGameDiscovery.jx3Installation(in: bottleURL).isDetected
     }
+
+    /// An existing embedded-Wine container only needs its immutable runtime
+    /// refreshed when the app ships a newer version. Keep it out of first-run
+    /// setup so the user sees an updater rather than the onboarding guide.
+    static func requiresBundledWineRuntimeUpdate(appGlobals: AppGlobals) -> Bool {
+        OnlineGameRuntimeKind.migrateLegacyCrossOverConfigurationIfNeeded(
+            appGlobals: appGlobals
+        )
+        guard OnlineGameRuntimeKind.selected() == .bundledWine,
+              let bottleURL = OnlineGameDiscovery.selectedBottleURL(
+                from: appGlobals.selectedBottle
+              ),
+              BundledWineRuntime.ownsPrefix(bottleURL),
+              bottleURL.lastPathComponent.caseInsensitiveCompare(
+                OnlineGameMode.defaultBottleName
+              ) == .orderedSame
+        else {
+            return false
+        }
+        return BundledWineRuntime.hasMigratableLegacyInstallation()
+            || BundledWineRuntime.requiresRuntimeUpdate(
+                runtimeURL: BundledWineRuntime.installationURL,
+                prefixURL: bottleURL
+            )
+    }
+}
+
+/// Shown only to users with an already-working embedded-Wine Games container
+/// when an app update includes a newer runtime. The existing container is
+/// preserved; `preparePrefix` detects it and performs only the runtime swap.
+struct OnlineGameRuntimeUpdateView: View {
+    @Binding var isPresented: Bool
+    @EnvironmentObject private var appGlobals: AppGlobals
+    @MainActor var load: @Sendable () async -> Void
+
+    @State private var progress: Double = 0
+    @State private var progressLabel = "正在检查内置 Wine 更新…"
+    @State private var isUpdating = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Modal(
+            "更新内置 Wine",
+            showModal: $isPresented,
+            scrollable: false,
+            allowsClose: false
+        ) {
+            VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("正在更新内置 Wine", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.title2.weight(.semibold))
+                    Text("将保留现有 Games 容器和剑网3文件，无需重新导入。")
+                        .foregroundStyle(.secondary)
+                    Text("\(installedVersion) → \(BundledWineRuntime.runtimeVersion)")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 9) {
+                    Text(progressLabel)
+                        .fontWeight(.medium)
+                    ProgressView(value: progress, total: 1)
+                        .progressViewStyle(.linear)
+                    Text("\(Int((progress * 100).rounded()))%")
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                HStack {
+                    Button {
+                        NSApplication.shared.terminate(nil)
+                    } label: {
+                        Label("退出 App", systemImage: "xmark.circle")
+                    }
+                    .buttonStyle(.bordered)
+
+                    Spacer()
+
+                    if errorMessage != nil {
+                        Button("重新尝试") {
+                            beginUpdate()
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else if isUpdating {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+            }
+            .frame(width: 520, alignment: .leading)
+            .padding(.vertical, 24)
+        }
+        .interactiveDismissDisabled()
+        .task {
+            beginUpdate()
+        }
+    }
+
+    private var installedVersion: String {
+        BundledWineRuntime.installedRuntimeVersion(
+            at: BundledWineRuntime.installationURL
+        ) ?? BundledWineRuntime.pendingLegacyRuntimeVersion()
+            ?? "已安装版本"
+    }
+
+    private func beginUpdate() {
+        guard !isUpdating else { return }
+        isUpdating = true
+        errorMessage = nil
+        progress = 0
+        progressLabel = "正在检查内置 Wine 更新…"
+
+        let reportProgress: BundledWineRuntime.ProgressHandler = { value, label in
+            Task { @MainActor in
+                progress = min(max(value, 0), 1)
+                progressLabel = label
+            }
+        }
+
+        Task { @MainActor in
+            do {
+                let bottleURL = try await Task.detached(priority: .userInitiated) {
+                    let bottleURL = try BundledWineRuntime.preparePrefix(
+                        progress: reportProgress
+                    )
+                    reportProgress(0.97, "正在核对 Games 容器配置…")
+                    try OnlineGameBottleConfiguration.apply(to: bottleURL)
+                    reportProgress(1, "内置 Wine 更新完成")
+                    return bottleURL
+                }.value
+                OnlineGameRuntimeKind.activate(
+                    .bundledWine,
+                    with: bottleURL,
+                    appGlobals: appGlobals
+                )
+                progress = 1
+                progressLabel = "内置 Wine 更新完成"
+                isUpdating = false
+                await load()
+                isPresented = false
+            } catch {
+                isUpdating = false
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
 }
 
 struct OnlineGameSetupLandingView: View {
@@ -52,7 +204,7 @@ struct OnlineGameSetupLandingView: View {
             Label("完成首次设置", systemImage: "sparkles.rectangle.stack")
         } description: {
             VStack(spacing: 10) {
-                Text("先选择 CrossOver 或 Procyon 内置 Wine，再创建独立的 Games 容器。最后导入启动器即可进入剑网3启动器首页。剑网3模式首次设置完成前不能退出。")
+                Text("先选择 CrossOver 或 Arclume 内置 Wine，再创建独立的 Games 容器。最后导入启动器即可进入剑网3启动器首页。剑网3模式首次设置完成前不能退出。")
                     .multilineTextAlignment(.center)
                 Button("开始设置", action: startAction)
                     .buttonStyle(.borderedProminent)
@@ -217,7 +369,7 @@ struct OnlineGameSetupGuide: View {
                     chooseRuntime(.bundledWine)
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("使用 Procyon 内置 Wine")
+                        Text("使用 Arclume 内置 Wine")
                             .fontWeight(.semibold)
                         Text(OnlineGameRuntimeKind.bundledWine.detail)
                             .font(.footnote)
@@ -375,9 +527,9 @@ struct OnlineGameSetupGuide: View {
                         if FileManager.default.fileExists(
                             atPath: BundledWineRuntime.prefixInitializationLogURL.path
                         ) {
-                            Button("打开初始化诊断日志") {
+                            Button("打开初始化诊断目录") {
                                 NSWorkspace.shared.open(
-                                    BundledWineRuntime.prefixInitializationLogURL
+                                    BundledWineRuntime.prefixInitializationDiagnosticsDirectoryURL
                                 )
                             }
                         }

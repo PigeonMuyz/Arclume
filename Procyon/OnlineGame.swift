@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import Metal
 
 enum OnlineGameMode {
     static let jx3GameID = "online.jx3.flagship"
@@ -13,11 +14,59 @@ enum OnlineGameMode {
     static let jx3GameDirectoryComponents = [
         "drive_c", "SeasunGame", "Game", "JX3", "bin", "zhcn_hd"
     ]
-    static let onlineGraphicsBackends: DropdownOptions = [
+    private static let allOnlineGraphicsBackends: DropdownOptions = [
         (id: "d3dmetal3", label: "D3DMetal 3"),
         (id: "d3dmetal4", label: "D3DMetal 4 Beta 2")
     ]
-    static let defaultGraphicsBackend = "d3dmetal4"
+
+    /// D3DMetal 4 requires the Metal 4 GPU family. Checking the actual
+    /// default device is more reliable than inferring support from the Mac
+    /// model name, and also handles future Apple Silicon generations.
+    static var supportsD3DMetal4: Bool {
+        guard #available(macOS 26.0, *),
+              let device = MTLCreateSystemDefaultDevice()
+        else {
+            return false
+        }
+        return device.supportsFamily(.metal4)
+    }
+
+    static var onlineGraphicsBackends: DropdownOptions {
+        graphicsBackends(supportingD3DMetal4: supportsD3DMetal4)
+    }
+
+    static var defaultGraphicsBackend: String {
+        defaultGraphicsBackend(supportingD3DMetal4: supportsD3DMetal4)
+    }
+
+    nonisolated static func graphicsBackends(
+        supportingD3DMetal4: Bool
+    ) -> DropdownOptions {
+        supportingD3DMetal4
+            ? allOnlineGraphicsBackends
+            : allOnlineGraphicsBackends.filter { $0.id != "d3dmetal4" }
+    }
+
+    nonisolated static func defaultGraphicsBackend(
+        supportingD3DMetal4: Bool
+    ) -> String {
+        supportingD3DMetal4 ? "d3dmetal4" : "d3dmetal3"
+    }
+
+    nonisolated static func resolvedGraphicsBackend(
+        _ requestedBackend: String,
+        supportingD3DMetal4: Bool
+    ) -> String {
+        let availableBackends = graphicsBackends(
+            supportingD3DMetal4: supportingD3DMetal4
+        )
+        guard availableBackends.contains(where: { $0.id == requestedBackend }) else {
+            return defaultGraphicsBackend(
+                supportingD3DMetal4: supportingD3DMetal4
+            )
+        }
+        return requestedBackend
+    }
 
     static var isEnabled: Bool {
         ProcyonMode.persisted?.isOnlineGameMode == true
@@ -29,13 +78,15 @@ enum OnlineGameMode {
 
     static func applyDefaultRuntimePreferences(to options: GameOptions) {
         guard isEnabled else { return }
-        if !onlineGraphicsBackends.contains(where: { $0.id == options.cxGraphicsBackend }) {
-            options.cxGraphicsBackend = defaultGraphicsBackend
-        }
+        let resolvedBackend = resolvedGraphicsBackend(
+            options.cxGraphicsBackend,
+            supportingD3DMetal4: supportsD3DMetal4
+        )
+        options.cxGraphicsBackend = resolvedBackend
         // The same persisted choice is consumed by CrossOver and standalone
         // Wine 11. Wine 11 resolves the selected D3DMetal version inside its
         // own runtime instead of injecting CrossOver files into the bottle.
-        options.d3dMtl4Enabled = options.cxGraphicsBackend == "d3dmetal4"
+        options.d3dMtl4Enabled = resolvedBackend == "d3dmetal4"
     }
 
     /// Preserve the same per-client options that users already configured

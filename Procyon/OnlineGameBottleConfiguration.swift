@@ -27,6 +27,7 @@ enum OnlineGameBottleConfiguration {
         "Software\\\\Wine\\\\Fonts\\\\Replacements"
     private static let wineExternalFontsPath =
         "Software\\\\Wine\\\\Fonts\\\\External Fonts"
+    private static let wineDebuggerPath = "Software\\\\Wine\\\\WineDbg"
 
     private static let configurationLock = NSLock()
 
@@ -161,6 +162,20 @@ enum OnlineGameBottleConfiguration {
             changed = upsert(["Codepages": "936,936"], in: wineFonts) || changed
         }
 
+        // WineDbg normally presents one modal dialog for every crashing child
+        // process. The JX3 launcher starts several CEF helpers, so a single
+        // non-fatal helper crash can otherwise bury the game under dialogs.
+        // Procyon still preserves the launch log and copied macOS crash report.
+        if let wineDebugger = registry.section(
+            forPath: wineDebuggerPath,
+            createIfMissing: true
+        ) {
+            changed = upsertDwords(
+                ["ShowCrashDialog": 0],
+                in: wineDebugger
+            ) || changed
+        }
+
         if let replacements = registry.section(
             forPath: wineFontReplacementsPath,
             createIfMissing: true
@@ -217,6 +232,18 @@ enum OnlineGameBottleConfiguration {
         var changed = false
         for (key, value) in values where section.getValue(forKey: key) != value {
             section.addOrSetValue(forKey: key, stringValue: value)
+            changed = true
+        }
+        return changed
+    }
+
+    private static func upsertDwords(
+        _ values: [String: UInt32],
+        in section: WineRegSection
+    ) -> Bool {
+        var changed = false
+        for (key, value) in values where section.getValue(forKey: key) != String(value) {
+            section.addOrSetDword(forKey: key, value: value)
             changed = true
         }
         return changed

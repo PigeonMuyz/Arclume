@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "runtimeRepository": "https://github.com/PigeonMuyz/Arclume-Runtime",
+  "runtimeSourceRevision": "5c3eed1644c23330f721faad88d49b51a499b51a",
+  "runtimeReleaseTag": "arclume-wine-1.0.0",
+  "runtimeVersion": "1.0.0",
+  "channel": "stable",
+  "releaseManifest": "Procyon/Resources/OnlineGameDependencies/arclume-wine-runtime.json",
+  "purpose": "Pins the bundled Arclume Wine release contract used by this App source revision."
+}
