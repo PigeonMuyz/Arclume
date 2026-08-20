@@ -1,0 +1,7 @@
+// Copy this file to Config.local.xcconfig and fill in the API values.
+API_PROTOCOL = https
+API_HOST = example.invalid
+API_PATH = /steam
+API_PATH_M = /media
+API_PATH_CUSTOM = /custom
+API_KEY = replace-me

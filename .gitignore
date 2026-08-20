@@ -1,0 +1,14 @@
+DerivedData/
+build/
+.derived-data-log-*
+Config.local.xcconfig
+.DS_Store
+*.profraw
+xcuserdata/
+Procyon.xcodeproj/-Xcc/
+logs/
+perf_config.ini
+RuntimeSource/cache/
+RuntimeSource/wine/
+RuntimeSource/build/
+RuntimeSource/dist/
