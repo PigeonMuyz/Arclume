@@ -43,6 +43,10 @@ Arclume 统一管理 macOS 原生游戏、Steam 原生游戏，以及由 CrossOv
 
 App 首次发布仍内嵌已验证的 Runtime，以保障离线初始化；`Runtime.lock.json` 和 App 资源中的 Manifest 固定其版本、ABI、归档 SHA-256 与旧版迁移规则。Runtime 的公开版本遵循 `Arclume Wine 1.0.*`，不直接复用上游 Wine 版本号。
 
+### 从 Procyon+ 迁移
+
+首次打开 Arclume 时，若检测到旧的 `~/Library/Application Support/Procyon`，会在同一磁盘卷内移动到 `~/Library/Application Support/Arclume`，不会复制 Games 容器或 Wine 前缀。旧的偏好域会一次性导入到 Arclume；如果目标目录已存在，只移动不冲突的顶层内容，避免覆盖用户的新数据。
+
 ### 运行要求
 
 - macOS 26.0 或更高版本。
@@ -64,7 +68,7 @@ python3 script/local_steam_proxy.py
 ### 构建
 
 ```bash
-xcodebuild -project Procyon.xcodeproj -scheme Procyon -configuration Debug build
+xcodebuild -project Arclume.xcodeproj -scheme Arclume -configuration Debug build
 ```
 
 ### AI / Vibe Coding 与贡献说明
@@ -75,7 +79,7 @@ Arclume 是一个 AI 辅助开发项目：本项目新增修改可以采用 Vibe
 
 ### 许可证与声明
 
-本仓库中的 Procyon 源代码以 [GNU GPL v3.0 only](LICENSE.txt) 发布。请保留上游版权、许可证文本和本仓库的 [NOTICE](NOTICE.md)。发布二进制版本时，必须同时提供对应版本的完整源码。
+本仓库中的 Arclume 源代码（包括其上游 Procyon 衍生部分）以 [GNU GPL v3.0 only](LICENSE.txt) 发布。请保留上游版权、许可证文本和本仓库的 [NOTICE](NOTICE.md)。发布二进制版本时，必须同时提供对应版本的完整源码。
 
 预编译运行库、字体、游戏相关配置/资源和其他第三方组件不因本项目采用 GPL 就自动转为 GPL；发布时请同时遵守其各自的许可证和再分发条件，详见 [第三方声明](THIRD-PARTY-NOTICES.md)。
 
@@ -107,6 +111,10 @@ This fork accepts AI-assisted and Vibe Coding contributions. Upstream Procyon do
 
 `PigeonMuyz/Arclume` owns the App, launcher integration and bundled Runtime Manifest. `PigeonMuyz/Arclume-Runtime` owns Wine source locks, patches, build scripts, ABI and release manifests. The App embeds a tested runtime for first-run/offline setup, while `Runtime.lock.json` pins the selected private Runtime release.
 
+### Migration from Procyon+
+
+On first launch, Arclume moves an existing `~/Library/Application Support/Procyon` directory to `~/Library/Application Support/Arclume` on the same volume, so Games containers and Wine prefixes are not copied. Preferences are imported once. If the destination already exists, only non-conflicting top-level entries are moved.
+
 ### Requirements
 
 - macOS 26.0 or later.
@@ -128,11 +136,11 @@ Choose **Local Steam Store proxy** under **Settings → Game metadata**, then re
 ### Build
 
 ```bash
-xcodebuild -project Procyon.xcodeproj -scheme Procyon -configuration Debug build
+xcodebuild -project Arclume.xcodeproj -scheme Arclume -configuration Debug build
 ```
 
 ### License
 
-The Procyon source code in this repository is licensed under [GPL-3.0-only](LICENSE.txt). Keep the upstream copyright notices and this repository's [NOTICE](NOTICE.md) when redistributing it.
+The Arclume source code in this repository, including its upstream-derived Procyon portions, is licensed under [GPL-3.0-only](LICENSE.txt). Keep the upstream copyright notices and this repository's [NOTICE](NOTICE.md) when redistributing it.
 
 Prebuilt runtime libraries, fonts, game-related configuration/resources, and other third-party components are not relicensed by this project; follow their own license and redistribution terms in the [third-party notices](THIRD-PARTY-NOTICES.md).

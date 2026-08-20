@@ -1,14 +1,14 @@
 # Third-Party Notices
 
-This file records third-party code, assets, and runtime payloads that may be present in a full Procyon+ app distribution. The GPL notice in `LICENSE.txt` does not relicense these components.
+This file records third-party code, assets, and runtime payloads that may be present in a full Arclume app distribution. The GPL notice in `LICENSE.txt` does not relicense these components.
 
 ## Upstream source
 
-Procyon+ is an independent, unofficial fork of [Procyon](https://github.com/italomandara/Procyon). The upstream source and its copyright notices remain subject to the GNU GPL v3.0. Keep `LICENSE.txt` and the notices in the relevant source files.
+Arclume is an independent, unofficial product derived from [Procyon](https://github.com/italomandara/Procyon). The upstream source and its copyright notices remain subject to the GNU GPL v3.0. Keep `LICENSE.txt` and the notices in the relevant source files.
 
 ## Swift package dependencies
 
-The versions are pinned in `Procyon.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`. Preserve each dependency's upstream license and notice when redistributing a built app.
+The versions are pinned in `Arclume.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved`. Preserve each dependency's upstream license and notice when redistributing a built app.
 
 - [Alamofire](https://github.com/Alamofire/Alamofire)
 - [Kingfisher](https://github.com/onevcat/Kingfisher)

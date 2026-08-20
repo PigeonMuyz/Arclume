@@ -5,7 +5,7 @@ set -euo pipefail
 # resources. Wine is never built in this repository; see Arclume-Runtime.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DESTINATION_DIR="$ROOT_DIR/Procyon/Resources/OnlineGameDependencies"
+DESTINATION_DIR="$ROOT_DIR/Arclume/Resources/OnlineGameDependencies"
 
 archive=""
 manifest=""

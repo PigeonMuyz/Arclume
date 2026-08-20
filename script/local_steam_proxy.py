@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""A loopback-only metadata adapter for Procyon development.
+"""A loopback-only metadata adapter for Arclume development.
 
 It requests real game data from Steam's public store endpoint and reshapes it to
-the response schema expected by Procyon. It deliberately has no account,
+the response schema expected by Arclume. It deliberately has no account,
 profile, or owned-game routes and does not accept credentials.
 """
 
@@ -28,7 +28,7 @@ def fetch_store_app(app_id: int, language: str) -> dict[str, Any] | None:
     query = urlencode({"appids": app_id, "l": language})
     request = Request(
         f"{STORE_ENDPOINT}?{query}",
-        headers={"User-Agent": "Procyon-LocalSteamProxy/1.0"},
+        headers={"User-Agent": "Arclume-LocalSteamProxy/1.0"},
     )
     try:
         with urlopen(request, timeout=15) as response:
@@ -60,7 +60,7 @@ def requirements(value: Any) -> dict[str, str] | None:
 
 
 def normalize_game(store_game: dict[str, Any], app_id: int) -> dict[str, Any]:
-    """Keep optional fields optional and guarantee Procyon's required fields."""
+    """Keep optional fields optional and guarantee Arclume's required fields."""
     platforms = store_game.get("platforms")
     platforms = platforms if isinstance(platforms, dict) else {}
     release_date = store_game.get("release_date")
@@ -132,7 +132,7 @@ def normalize_game(store_game: dict[str, Any], app_id: int) -> dict[str, Any]:
 
 
 class SteamProxyHandler(BaseHTTPRequestHandler):
-    server_version = "ProcyonLocalSteamProxy/1.0"
+    server_version = "ArclumeLocalSteamProxy/1.0"
 
     def do_GET(self) -> None:  # noqa: N802 - required by BaseHTTPRequestHandler
         parsed = urlparse(self.path)
@@ -169,7 +169,7 @@ class SteamProxyHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     server = ThreadingHTTPServer((HOST, PORT), SteamProxyHandler)
-    print(f"Procyon local Steam Store proxy listening on http://{HOST}:{PORT}")
+    print(f"Arclume local Steam Store proxy listening on http://{HOST}:{PORT}")
     print("Press Control-C to stop it.")
     try:
         server.serve_forever()
