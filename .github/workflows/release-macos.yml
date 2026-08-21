@@ -180,9 +180,10 @@ jobs:
           set -euo pipefail
 
           archive_path="$RUNNER_TEMP/Arclume.xcarchive"
-          artifact_dir="$RUNNER_TEMP/arclume-release"
+          package_root="$RUNNER_TEMP/arclume-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          artifact_dir="$package_root/artifacts"
           full_app_path="$archive_path/Products/Applications/Arclume.app"
-          lite_app_path="$RUNNER_TEMP/Arclume-no-runtime.app"
+          lite_app_path="$package_root/Arclume-no-runtime.app"
           test -d "$full_app_path"
 
           bundle_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$full_app_path/Contents/Info.plist")
@@ -190,6 +191,9 @@ jobs:
           test "$bundle_version" = "$VERSION"
           test "$bundle_build" = "$BUILD"
 
+          # Self-hosted runners can retain RUNNER_TEMP between jobs.  Keep all
+          # temporary package paths unique to this workflow attempt so a failed
+          # prior attempt never blocks a later release.
           mkdir -p "$artifact_dir"
           full_dmg_path="$artifact_dir/Arclume-${VERSION}-${BUILD}-with-runtime.dmg"
           lite_dmg_path="$artifact_dir/Arclume-${VERSION}-${BUILD}-no-runtime.dmg"
