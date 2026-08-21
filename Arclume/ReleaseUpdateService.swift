@@ -50,6 +50,14 @@ nonisolated struct ArclumeGitHubRelease: Codable, Equatable, Sendable {
         tagName.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
     }
 
+    var applicationMarketingVersion: String {
+        ArclumeVersionComparison.applicationReleaseComponents(tagName).marketingVersion
+    }
+
+    var applicationBuildNumber: String? {
+        ArclumeVersionComparison.applicationReleaseComponents(tagName).buildNumber.map(String.init)
+    }
+
     var diskImage: Asset? {
         assets.first { $0.name.lowercased().hasSuffix("-no-runtime.dmg") }
             ?? assets.first { $0.name.lowercased().hasSuffix(".dmg") }
@@ -77,7 +85,7 @@ nonisolated enum ArclumeVersionComparison {
         currentMarketingVersion: String,
         currentBuild: String
     ) -> Bool {
-        let release = parseApplicationReleaseTag(releaseTag)
+        let release = applicationReleaseComponents(releaseTag)
         let marketingComparison = release.marketingVersion.compare(
             currentMarketingVersion,
             options: [.numeric, .caseInsensitive]
@@ -98,7 +106,7 @@ nonisolated enum ArclumeVersionComparison {
         ) == .orderedDescending
     }
 
-    private static func parseApplicationReleaseTag(_ tag: String) -> (
+    static func applicationReleaseComponents(_ tag: String) -> (
         marketingVersion: String,
         buildNumber: Int?
     ) {
@@ -274,7 +282,7 @@ final class ArclumeUpdateService: ObservableObject {
         }
     }
 
-    func downloadApplicationUpdate() async {
+    func installApplicationUpdate() async {
         guard !isDownloadingApplication,
               let release = latestApplicationRelease,
               let diskImage = release.diskImage
@@ -289,15 +297,41 @@ final class ArclumeUpdateService: ObservableObject {
         defer { isDownloadingApplication = false }
 
         do {
-            applicationDownloadMessage = "正在下载 Arclume 更新…"
+            applicationDownloadMessage = "正在下载并校验 Arclume 更新…"
             let temporaryURL = try await downloadVerifiedAsset(
                 diskImage,
                 in: release
             )
-            let destination = try uniqueDownloadsURL(named: diskImage.name)
-            try FileManager.default.moveItem(at: temporaryURL, to: destination)
-            applicationDownloadMessage = "已下载到“下载”文件夹。"
-            NSWorkspace.shared.activateFileViewerSelecting([destination])
+            defer { try? FileManager.default.removeItem(at: temporaryURL) }
+
+            applicationDownloadMessage = "正在验证签名并安装更新…"
+            let currentInfo = Bundle.main.infoDictionary
+            let currentVersion = currentInfo?["CFBundleShortVersionString"] as? String ?? "0"
+            let currentBuild = currentInfo?["CFBundleVersion"] as? String ?? "0"
+            let appURL = Bundle.main.bundleURL
+            let installedURL = try await Task.detached(priority: .userInitiated) {
+                let result = try ArclumeAppUpdateInstaller.install(
+                    diskImageURL: temporaryURL,
+                    releaseVersion: release.applicationMarketingVersion,
+                    releaseBuild: release.applicationBuildNumber,
+                    currentVersion: currentVersion,
+                    currentBuild: currentBuild,
+                    currentAppURL: appURL
+                )
+                switch result {
+                case .installed(let url): return url
+                }
+            }.value
+
+            applicationDownloadMessage = "更新已安装，正在重新启动…"
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            configuration.createsNewApplicationInstance = true
+            try await NSWorkspace.shared.openApplication(
+                at: installedURL,
+                configuration: configuration
+            )
+            NSApp.terminate(nil)
         } catch {
             applicationError = localizedError(error)
         }
@@ -504,26 +538,6 @@ final class ArclumeUpdateService: ObservableObject {
         throw lastError
     }
 
-    private func uniqueDownloadsURL(named name: String) throws -> URL {
-        let directory = try FileManager.default.url(
-            for: .downloadsDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let source = URL(fileURLWithPath: name)
-        let stem = source.deletingPathExtension().lastPathComponent
-        let suffix = source.pathExtension
-        var index = 1
-        var candidate = directory.appendingPathComponent(name)
-        while FileManager.default.fileExists(atPath: candidate.path) {
-            index += 1
-            candidate = directory.appendingPathComponent(
-                "\(stem) (\(index)).\(suffix)"
-            )
-        }
-        return candidate
-    }
 
     private static func cachedRelease(
         for repository: ArclumeReleaseRepository,

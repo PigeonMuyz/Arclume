@@ -13,6 +13,7 @@ nonisolated enum SteamClientKind: String, Hashable, Sendable {
 nonisolated enum SteamIdentitySource: Hashable, Sendable {
     case native
     case crossOverBottle(URL)
+    case winePrefix(URL)
 
     var cacheKey: String {
         switch self {
@@ -20,6 +21,8 @@ nonisolated enum SteamIdentitySource: Hashable, Sendable {
             return "native"
         case .crossOverBottle(let bottleURL):
             return "bottle:\(bottleURL.standardizedFileURL.path)"
+        case .winePrefix(let prefixURL):
+            return "wine-prefix:\(prefixURL.standardizedFileURL.path)"
         }
     }
 }

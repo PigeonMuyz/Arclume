@@ -44,6 +44,13 @@ nonisolated struct SteamDiscoveryService {
     }
 
     func identities(in installation: ContainerSteamInstallation) -> [SteamIdentity] {
+        identities(in: installation, source: .crossOverBottle(installation.bottleURL))
+    }
+
+    func identities(
+        in installation: ContainerSteamInstallation,
+        source: SteamIdentitySource
+    ) -> [SteamIdentity] {
         installation.users.map { user in
             SteamIdentity(
                 steamID: user.steamID,
@@ -52,7 +59,7 @@ nonisolated struct SteamDiscoveryService {
                 rememberPassword: user.rememberPassword,
                 mostRecent: user.mostRecent,
                 timestamp: user.timestamp,
-                source: .crossOverBottle(installation.bottleURL),
+                source: source,
                 avatarURL: avatarURL(
                     for: user.steamID,
                     in: installation.configURL

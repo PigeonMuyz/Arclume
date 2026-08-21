@@ -119,7 +119,9 @@ struct GameThumbnail: View {
     private var steamInstallDestination: SteamInstallDestination {
         item.steamInstallDestination(
             nativeSteamAvailable: nativeSteamStore.isReady,
-            containerSteamAvailable: containerSteamStore.isReady && appGlobals.cxAppPath != nil,
+            containerSteamAvailable: containerSteamStore.isReady
+                && (StandardGameRuntimeKind.selected() == .bundledWine
+                    || appGlobals.cxAppPath != nil),
             ownership: steamOwnership
         )
     }
@@ -574,16 +576,24 @@ struct GameThumbnail: View {
         case .nativeSteam:
             nativeSteamStore.install(appID: item.steamAppID)
         case .containerSteam:
-            guard let cxPath = appGlobals.cxAppPath else {
-                containerSteamStore.errorMessage = L10n.string(
-                    "Select a CrossOver app before installing a game."
+            switch StandardGameRuntimeKind.selected() {
+            case .bundledWine:
+                containerSteamStore.install(
+                    appID: item.steamAppID,
+                    using: .bundledWine
                 )
-                return
+            case .crossOver:
+                guard let cxPath = appGlobals.cxAppPath else {
+                    containerSteamStore.errorMessage = L10n.string(
+                        "Select a CrossOver app before installing a game."
+                    )
+                    return
+                }
+                containerSteamStore.install(
+                    appID: item.steamAppID,
+                    crossOverAppURL: URL(fileURLWithPath: cxPath)
+                )
             }
-            containerSteamStore.install(
-                appID: item.steamAppID,
-                crossOverAppURL: URL(fileURLWithPath: cxPath)
-            )
         case .unavailable:
             if hasSteamAccountMismatch {
                 nativeSteamStore.errorMessage = installHelp

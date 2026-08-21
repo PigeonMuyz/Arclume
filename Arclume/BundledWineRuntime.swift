@@ -229,6 +229,90 @@ enum OnlineGameRuntimeKind: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// The ordinary Windows-game library keeps its runtime preference separate
+/// from the JX3 runtime. Switching does not touch either existing prefix.
+enum StandardGameRuntimeKind: String, CaseIterable, Identifiable, Sendable {
+    case crossOver
+    case bundledWine
+
+    static let defaultsKey = "standard-game-runtime-kind"
+    private static let crossOverBottleDefaultsKey =
+        "standard-game-runtime-crossover-bottle"
+    private static let bundledWineBottleDefaultsKey =
+        "standard-game-runtime-bundled-wine-bottle"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .crossOver: "CrossOver"
+        case .bundledWine: "Arclume Wine"
+        }
+    }
+
+    static func selected(in defaults: UserDefaults? = nil) -> Self {
+        let defaults = defaults ?? UserDefaults(suiteName: suiteName) ?? .standard
+        guard let value = defaults.string(forKey: defaultsKey), let runtime = Self(rawValue: value) else {
+            return .crossOver
+        }
+        return runtime
+    }
+
+    static func select(_ runtime: Self, in defaults: UserDefaults? = nil) {
+        let defaults = defaults ?? UserDefaults(suiteName: suiteName) ?? .standard
+        defaults.set(runtime.rawValue, forKey: defaultsKey)
+    }
+
+    static func configuredBottleURL(
+        for runtime: Self,
+        in defaults: UserDefaults? = nil
+    ) -> URL? {
+        let defaults = defaults ?? UserDefaults(suiteName: suiteName) ?? .standard
+        guard let path = defaults.string(forKey: bottleDefaultsKey(for: runtime)) else {
+            return nil
+        }
+        return OnlineGameDiscovery.selectedBottleURL(from: path)
+    }
+
+    static func recordBottle(
+        _ bottleURL: URL,
+        for runtime: Self,
+        in defaults: UserDefaults? = nil
+    ) {
+        let defaults = defaults ?? UserDefaults(suiteName: suiteName) ?? .standard
+        defaults.set(
+            bottleURL.standardizedFileURL.absoluteString,
+            forKey: bottleDefaultsKey(for: runtime)
+        )
+    }
+
+    static func activate(
+        _ runtime: Self,
+        with bottleURL: URL,
+        appGlobals: AppGlobals,
+        in defaults: UserDefaults? = nil
+    ) {
+        let defaults = defaults ?? UserDefaults(suiteName: suiteName) ?? .standard
+        if let current = OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle),
+           FileManager.default.fileExists(atPath: current.path)
+        {
+            recordBottle(current, for: selected(in: defaults), in: defaults)
+        }
+        recordBottle(bottleURL, for: runtime, in: defaults)
+        select(runtime, in: defaults)
+        let path = bottleURL.standardizedFileURL.absoluteString
+        appGlobals.selectedBottle = path
+        persistUsrDefOptionString(key: "selectedBottle", value: path)
+    }
+
+    private static func bottleDefaultsKey(for runtime: Self) -> String {
+        switch runtime {
+        case .crossOver: crossOverBottleDefaultsKey
+        case .bundledWine: bundledWineBottleDefaultsKey
+        }
+    }
+}
+
 enum BundledWineRuntimeError: LocalizedError {
     case missingArchive
     case missingManifest
@@ -337,12 +421,24 @@ enum BundledWineRuntime {
             .appendingPathComponent(OnlineGameMode.defaultBottleName, isDirectory: true)
     }
 
+    /// A normal-mode Steam prefix. It never shares or migrates the dedicated
+    /// JX3 prefix, so either runtime can be changed without risking game data.
+    nonisolated static var standardSteamPrefixURL: URL {
+        ARCLUME_SUPPORT_FOLDER_URL
+            .appendingPathComponent("WindowsGameWinePrefixes", isDirectory: true)
+            .appendingPathComponent("Steam", isDirectory: true)
+    }
+
     nonisolated static var runtimeVersion: String {
         manifest.version
     }
 
     nonisolated static func ownsPrefix(_ bottleURL: URL) -> Bool {
         bottleURL.standardizedFileURL.path == prefixURL.standardizedFileURL.path
+    }
+
+    nonisolated static func ownsStandardSteamPrefix(_ bottleURL: URL) -> Bool {
+        bottleURL.standardizedFileURL.path == standardSteamPrefixURL.standardizedFileURL.path
     }
 
     nonisolated static func isValidRuntime(at runtimeURL: URL = installationURL) -> Bool {
@@ -595,21 +691,46 @@ enum BundledWineRuntime {
     nonisolated static func preparePrefix(
         progress: ProgressHandler?
     ) throws -> URL {
+        try preparePrefix(
+            at: prefixURL,
+            containerName: "Games",
+            progress: progress
+        )
+    }
+
+    @discardableResult
+    nonisolated static func prepareStandardSteamPrefix(
+        progress: ProgressHandler? = nil
+    ) throws -> URL {
+        try preparePrefix(
+            at: standardSteamPrefixURL,
+            containerName: "Steam",
+            progress: progress
+        )
+    }
+
+    private static func preparePrefix(
+        at targetPrefixURL: URL,
+        containerName: String,
+        progress: ProgressHandler?
+    ) throws -> URL {
         progress?(0.01, "正在检查内置 Wine…")
         let runtimeURL = try ensureInstalled { fraction, label in
             progress?(0.02 + fraction * 0.60, label)
         }
-        if FileManager.default.fileExists(atPath: prefixURL.path) {
-            guard isValidPrefix() else { throw BundledWineRuntimeError.invalidPrefix }
-            progress?(1, "内置 Wine 与 Games 容器已就绪")
-            return prefixURL
+        if FileManager.default.fileExists(atPath: targetPrefixURL.path) {
+            guard isValidPrefix(at: targetPrefixURL) else {
+                throw BundledWineRuntimeError.invalidPrefix
+            }
+            progress?(1, "内置 Wine 与 \(containerName) 容器已就绪")
+            return targetPrefixURL
         }
 
         let fileManager = FileManager.default
-        let prefixParentURL = prefixURL.deletingLastPathComponent()
+        let prefixParentURL = targetPrefixURL.deletingLastPathComponent()
         try fileManager.createDirectory(at: prefixParentURL, withIntermediateDirectories: true)
         let stagingPrefixURL = prefixParentURL.appendingPathComponent(
-            ".\(OnlineGameMode.defaultBottleName)-initializing-\(UUID().uuidString)",
+            ".\(containerName)-initializing-\(UUID().uuidString)",
             isDirectory: true
         )
         defer { try? fileManager.removeItem(at: stagingPrefixURL) }
@@ -633,7 +754,7 @@ enum BundledWineRuntime {
             environment["WINEDEBUG"] = "-all,+timestamp,+pid,+tid,+server,+seh"
         }
 
-        progress?(0.74, "正在创建独立的 Games 容器…")
+        progress?(0.74, "正在创建独立的 \(containerName) 容器…")
         let initializationLogHandle = try resetPrefixInitializationLog(
             runtimeURL: runtimeURL,
             stagingPrefixURL: stagingPrefixURL,
@@ -689,9 +810,9 @@ enum BundledWineRuntime {
                 atomically: true,
                 encoding: .utf8
             )
-            try fileManager.moveItem(at: stagingPrefixURL, to: prefixURL)
-            progress?(1, "内置 Wine 与 Games 容器已准备完成")
-            return prefixURL
+            try fileManager.moveItem(at: stagingPrefixURL, to: targetPrefixURL)
+            progress?(1, "内置 Wine 与 \(containerName) 容器已准备完成")
+            return targetPrefixURL
         }
         if process.terminationReason == .uncaughtSignal {
             copyRecentWineCrashReports(to: initializationLogHandle)
@@ -701,12 +822,28 @@ enum BundledWineRuntime {
 
     nonisolated static func makeLaunchConfiguration(options: GameOptions) throws -> LaunchConfiguration {
         let runtimeURL = try ensureInstalled()
+        let graphicsBackend = OnlineGameMode.resolvedGraphicsBackend(
+            options.cxGraphicsBackend,
+            supportingD3DMetal4: OnlineGameMode.supportsD3DMetal4
+        )
         return try makeLaunchConfiguration(
             runtimeURL: runtimeURL,
-            graphicsBackend: options.cxGraphicsBackend,
-            d3dMetal4Enabled: options.d3dMtl4Enabled,
+            graphicsBackend: graphicsBackend,
+            d3dMetal4Enabled: graphicsBackend == "d3dmetal4",
             mtlHudEnabled: options.mtlHudEnabled,
             wineMSync: options.wineMSync
+        )
+    }
+
+    nonisolated static func makeDefaultLaunchConfiguration() throws -> LaunchConfiguration {
+        let runtimeURL = try ensureInstalled()
+        let graphicsBackend = OnlineGameMode.defaultGraphicsBackend
+        return try makeLaunchConfiguration(
+            runtimeURL: runtimeURL,
+            graphicsBackend: graphicsBackend,
+            d3dMetal4Enabled: graphicsBackend == "d3dmetal4",
+            mtlHudEnabled: false,
+            wineMSync: true
         )
     }
 

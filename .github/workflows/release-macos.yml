@@ -26,6 +26,10 @@ jobs:
       PROJECT: Arclume.xcodeproj
       SCHEME: Arclume
       GH_TOKEN: ${{ github.token }}
+      MACOS_APP_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_APP_CERTIFICATE_P12_BASE64 }}
+      MACOS_APP_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_APP_CERTIFICATE_PASSWORD }}
+      MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
+      MACOS_DEVELOPER_TEAM_ID: ${{ secrets.MACOS_DEVELOPER_TEAM_ID }}
 
     steps:
       - name: 检出源代码和 LFS 资源
@@ -98,7 +102,61 @@ jobs:
             echo "release_name=Arclume $version ($build)"
           } >> "$GITHUB_OUTPUT"
 
+      - name: 检查发布签名配置
+        id: signing
+        run: |
+          set -euo pipefail
+          if [ -n "$MACOS_APP_CERTIFICATE_P12_BASE64" ] \
+            && [ -n "$MACOS_APP_CERTIFICATE_PASSWORD" ] \
+            && [ -n "$MACOS_DEVELOPER_TEAM_ID" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "identity=${MACOS_SIGNING_IDENTITY:-Developer ID Application}" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "发布签名凭据未配置：本次产物仅可手动安装，不能用于应用内自动更新。"
+          fi
+
+      - name: 导入 Developer ID 签名证书
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/arclume-signing.keychain-db"
+          certificate="$RUNNER_TEMP/arclume-signing.p12"
+          printf '%s' "$MACOS_APP_CERTIFICATE_P12_BASE64" | base64 -D > "$certificate"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_APP_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain"
+          security list-keychain -d user -s "$keychain" login.keychain-db
+          security find-identity -v -p codesigning "$keychain"
+          echo "ARCLUME_SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: 构建签名 Archive
+        if: steps.signing.outputs.enabled == 'true'
+        env:
+          SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          archive_path="$RUNNER_TEMP/Arclume.xcarchive"
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination "generic/platform=macOS" \
+            -archivePath "$archive_path" \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_STYLE=Manual \
+            CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+            DEVELOPMENT_TEAM="$MACOS_DEVELOPER_TEAM_ID" \
+            OTHER_CODE_SIGN_FLAGS="--timestamp" \
+            SWIFT_EMIT_LOC_STRINGS=NO
+          codesign --verify --deep --strict --verbose=2 "$archive_path/Products/Applications/Arclume.app"
+          codesign --display --verbose=4 "$archive_path/Products/Applications/Arclume.app"
+
       - name: 构建未签名 Archive
+        if: steps.signing.outputs.enabled != 'true'
         run: |
           archive_path="$RUNNER_TEMP/Arclume.xcarchive"
           xcodebuild archive \
@@ -117,6 +175,7 @@ jobs:
         env:
           VERSION: ${{ steps.release.outputs.version }}
           BUILD: ${{ steps.release.outputs.build }}
+          SIGNED_RELEASE: ${{ steps.signing.outputs.enabled }}
         run: |
           set -euo pipefail
 
@@ -155,6 +214,14 @@ jobs:
             "$lite_dmg_path"
           hdiutil verify "$lite_dmg_path"
 
+          if [ "$SIGNED_RELEASE" = "true" ]; then
+            signing_identity="${MACOS_SIGNING_IDENTITY:-Developer ID Application}"
+            codesign --force --sign "$signing_identity" --timestamp "$full_dmg_path"
+            codesign --force --sign "$signing_identity" --timestamp "$lite_dmg_path"
+            hdiutil verify "$full_dmg_path"
+            hdiutil verify "$lite_dmg_path"
+          fi
+
           full_checksum_path="$full_dmg_path.sha256"
           lite_checksum_path="$lite_dmg_path.sha256"
           shasum -a 256 "$full_dmg_path" > "$full_checksum_path"
@@ -166,6 +233,7 @@ jobs:
             echo "lite_dmg_path=$lite_dmg_path"
             echo "full_checksum_path=$full_checksum_path"
             echo "lite_checksum_path=$lite_checksum_path"
+            echo "signed_release=$SIGNED_RELEASE"
           } >> "$GITHUB_OUTPUT"
 
       - name: 保存构建产物
@@ -184,6 +252,7 @@ jobs:
           LITE_DMG_PATH: ${{ steps.package.outputs.lite_dmg_path }}
           FULL_CHECKSUM_PATH: ${{ steps.package.outputs.full_checksum_path }}
           LITE_CHECKSUM_PATH: ${{ steps.package.outputs.lite_checksum_path }}
+          SIGNED_RELEASE: ${{ steps.package.outputs.signed_release }}
         run: |
           set -euo pipefail
 
@@ -207,7 +276,11 @@ jobs:
             "with-runtime SHA-256：$full_checksum" \
             "no-runtime SHA-256：$lite_checksum" \
             "" \
-            "此自动构建流程不保存代码签名或公证私钥，因此 DMG 未签名、未公证。")
+            "$(if [ "$SIGNED_RELEASE" = "true" ]; then
+                printf '%s' 'App 已使用 Developer ID 签名；尚未自动公证。应用内更新会验证同一 Team 的 App 签名。'
+              else
+                printf '%s' '本次未配置发布签名凭据，DMG 未签名、未公证，且不能作为应用内自动更新来源。'
+              fi)")
 
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$TAG" \

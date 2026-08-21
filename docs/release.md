@@ -14,7 +14,7 @@ Runtime 版本从 `arclume-wine-runtime.json` 的 `version` 字段读取。不�
 
 1. 所有功能改动都已有 `CHANGELOG/unreleased/` 记录。
 2. README、Runtime 文档、第三方声明和发布说明与实际内容一致。
-3. 无签名 Release build、DMG 和 SHA-256 的验证路径已完成。
+3. 已确认本次发布是否配置 Developer ID 签名；若要提供应用内自动更新，必须配置签名。
 4. 远端 `main` 已包含所有待发布提交，且本地/远端 SHA 一致。
 5. Runtime 变更已完成 Manifest、ABI、SHA-256 与迁移审核。
 
@@ -39,11 +39,18 @@ Runtime 版本从 `arclume-wine-runtime.json` 的 `version` 字段读取。不�
 | `Arclume-<version>-<build>-no-runtime.dmg` | 移除 Wine 归档，适合已有 Runtime 的用户。 |
 | `*.dmg.sha256` | 对应 DMG 的 SHA-256。 |
 
-每个 DMG 都由 `hdiutil verify` 校验。当前 Actions 不保存 Developer ID 或 Notary 凭据，因此产物未签名、未公证；在宣称面向普通用户正式分发前，必须单独接入签名与公证流程。
+每个 DMG 都由 `hdiutil verify` 校验。若仓库配置下列 GitHub Actions Secrets，workflow 会导入 Developer ID 证书、签名 Archive 和 DMG，并由 App 在自动更新时验证 Bundle ID、版本、构建号与同一 Team 的嵌套签名：
+
+- `MACOS_APP_CERTIFICATE_P12_BASE64`
+- `MACOS_APP_CERTIFICATE_PASSWORD`
+- `MACOS_DEVELOPER_TEAM_ID`
+- `MACOS_SIGNING_IDENTITY`（可选；默认 `Developer ID Application`）
+
+未配置时仍会产出未签名 DMG，供手动安装和开发验证，但 App 会拒绝将其用于自动覆盖安装。此流程不包含 Apple Notary 凭据；公证需要在后续单独接入。
 
 ## 发布后验证
 
 1. 确认 GitHub Release tag、目标 commit、标题、资产和 SHA-256 全部正确。
 2. 验证 `with-runtime` 与 `no-runtime` 资产均可下载且大小合理。
 3. 在干净环境验证首次引导；`no-runtime` 缺少 Runtime 时应引导用户到“设置 → 更新”。
-4. 对已有用户，确认 App 更新不会移动 Games 容器，Runtime 更新不会覆盖用户 Prefix。
+4. 对已有用户，确认 App 更新不会移动 Games、Steam 或 CrossOver 容器，Runtime 更新不会覆盖用户 Prefix。

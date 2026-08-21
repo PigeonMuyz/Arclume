@@ -91,30 +91,38 @@ final class ContainerSteamStore: ObservableObject {
     }
 
     func openSteam(crossOverAppURL: URL) {
+        openSteam(using: .crossOver(crossOverAppURL))
+    }
+
+    func openSteam(using runtime: ContainerSteamRuntime) {
         guard let installation else {
             errorMessage = String(
-                localized: "Steam was not found in the selected CrossOver bottle."
+                localized: "Steam was not found in the selected Windows games container."
             )
             return
         }
 
         do {
-            try service.openSteam(in: installation, using: crossOverAppURL)
+            try service.openSteam(in: installation, using: runtime)
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     func install(appID: Int, crossOverAppURL: URL) {
+        install(appID: appID, using: .crossOver(crossOverAppURL))
+    }
+
+    func install(appID: Int, using runtime: ContainerSteamRuntime) {
         guard let installation else {
             errorMessage = String(
-                localized: "Steam was not found in the selected CrossOver bottle."
+                localized: "Steam was not found in the selected Windows games container."
             )
             return
         }
 
         do {
-            try service.install(appID: appID, in: installation, using: crossOverAppURL)
+            try service.install(appID: appID, in: installation, using: runtime)
             snapshots[appID] = SteamInstallSnapshot(
                 appID: appID,
                 state: .waiting,
