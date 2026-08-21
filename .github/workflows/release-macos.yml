@@ -183,7 +183,6 @@ jobs:
           package_root="$RUNNER_TEMP/arclume-release-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           artifact_dir="$package_root/artifacts"
           full_app_path="$archive_path/Products/Applications/Arclume.app"
-          lite_app_path="$package_root/Arclume-no-runtime.app"
           test -d "$full_app_path"
 
           bundle_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$full_app_path/Contents/Info.plist")
@@ -206,26 +205,37 @@ jobs:
             "$full_dmg_path"
           hdiutil verify "$full_dmg_path"
 
-          # Build a lightweight staging App through hard links, so removing the
-          # bundled Runtime only unlinks its staged path instead of duplicating the
-          # complete App on the release runner.
-          test ! -e "$lite_app_path"
-          mkdir -p "$lite_app_path"
-          rsync -aE --link-dest="$full_app_path" "$full_app_path/" "$lite_app_path/"
+          # The archived App is an isolated build product.  Temporarily move its
+          # Runtime archive out of the bundle to make the no-runtime DMG, then
+          # restore it even if packaging fails.  This avoids making any second App
+          # tree on a runner with limited temporary storage.
           runtime_manifest="Arclume/Resources/OnlineGameDependencies/arclume-wine-runtime.json"
           runtime_archive_name=$(plutil -extract archive.name raw "$runtime_manifest")
-          runtime_archive="$lite_app_path/Contents/Resources/OnlineGameDependencies/$runtime_archive_name"
+          runtime_archive="$full_app_path/Contents/Resources/OnlineGameDependencies/$runtime_archive_name"
+          runtime_archive_staging="$package_root/$runtime_archive_name"
           test -f "$runtime_archive"
-          runtime_archive_link_count=$(stat -f '%l' "$runtime_archive")
-          test "$runtime_archive_link_count" -ge 2
-          rm -f "$runtime_archive"
+          restore_runtime_archive() {
+            if [ -f "$runtime_archive_staging" ]; then
+              mv "$runtime_archive_staging" "$runtime_archive"
+            fi
+          }
+          mv "$runtime_archive" "$runtime_archive_staging"
+          trap restore_runtime_archive EXIT
+          if [ "$SIGNED_RELEASE" = "true" ]; then
+            signing_identity="${MACOS_SIGNING_IDENTITY:-Developer ID Application}"
+            codesign --force --sign "$signing_identity" --timestamp \
+              --preserve-metadata=identifier,entitlements,requirements,flags,runtime \
+              "$full_app_path"
+          fi
           hdiutil create \
             -volname "Arclume" \
-            -srcfolder "$lite_app_path" \
+            -srcfolder "$full_app_path" \
             -format UDZO \
             -imagekey zlib-level=9 \
             "$lite_dmg_path"
           hdiutil verify "$lite_dmg_path"
+          restore_runtime_archive
+          trap - EXIT
 
           if [ "$SIGNED_RELEASE" = "true" ]; then
             signing_identity="${MACOS_SIGNING_IDENTITY:-Developer ID Application}"
