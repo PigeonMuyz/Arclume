@@ -12,7 +12,7 @@ Arclume 用一个本地游戏库管理 macOS 原生游戏、Steam 原生游戏�
 
 ### 功能
 
-- 导入多个 Steam Library，并区分 macOS 原生游戏与 CrossOver 游戏。
+- 导入多个 Steam Library，并区分 macOS 原生游戏、CrossOver 游戏和 Arclume Wine 游戏。
 - 扫描 `/Applications` 和 `~/Applications` 中声明为 Game 的原生 App。
 - 提供原生、CrossOver 与未经验证的运行状态，以及每游戏的兼容性记录。
 - 支持每游戏的 CrossOver 图形后端、启动参数、环境变量与其他运行选项。
@@ -23,7 +23,7 @@ Arclume 用一个本地游戏库管理 macOS 原生游戏、Steam 原生游戏�
 ### 系统要求
 
 - macOS 26.0 或更高版本。
-- Windows Steam 游戏需要用户自行安装 CrossOver，并在设置中选择 CrossOver App 和 Bottle。
+- Windows Steam 游戏可在设置中选择 CrossOver，或使用 Arclume Wine 的独立 Steam 容器；后者不需要安装 CrossOver。
 - Arclume Wine Runtime 仅面向 x86_64 Windows 游戏；Apple Silicon Mac 通过 Rosetta 运行其 Wine 进程。
 
 ### 安装与更新
@@ -35,9 +35,9 @@ Release 提供两种 DMG：
 | `with-runtime` | 首次安装或需要离线初始化 Arclume Wine 的用户。 |
 | `no-runtime` | 已安装 Runtime 或希望减小下载体积的用户；可在“设置 → 更新”下载 Runtime。 |
 
-每个 DMG 都附带 SHA-256 文件。GitHub Actions 构建的默认产物未签名、未公证；请在安装前核对来源和校验和。
+每个 DMG 都附带 SHA-256 文件。配置 Developer ID 证书的 Release 会签名 App，并支持应用内“下载、签名验证、覆盖安装、重启”更新；未配置证书的 Actions 产物只可手动安装。公证状态以对应 Release 说明为准。
 
-应用内更新不会覆盖用户的 `Games` 容器。Runtime 更新会检查 Manifest、ABI 与 SHA-256，并以原子替换方式更新运行时本体。
+应用内更新不会覆盖用户的 `Games`、Steam 或 CrossOver 容器。Runtime 更新会检查 Manifest、ABI 与 SHA-256，并以原子替换方式更新运行时本体。
 
 ### 项目结构
 

@@ -1204,7 +1204,17 @@ final class AppGlobals: ObservableObject {
     func refreshSteamIdentity(containerInstallation: ContainerSteamInstallation?) {
         let discoveryService = SteamDiscoveryService()
         let nativeInstallation = discoveryService.detectNativeSteam()
-        let containerIdentities = containerInstallation.map(discoveryService.identities) ?? []
+        let containerSource = containerInstallation.map { installation in
+            BundledWineRuntime.ownsStandardSteamPrefix(installation.bottleURL)
+                ? SteamIdentitySource.winePrefix(installation.bottleURL)
+                : SteamIdentitySource.crossOverBottle(installation.bottleURL)
+        }
+        let containerIdentities = containerInstallation.map { installation in
+            discoveryService.identities(
+                in: installation,
+                source: containerSource ?? .crossOverBottle(installation.bottleURL)
+            )
+        } ?? []
         let identity = discoveryService.preferredIdentity(
             nativeInstallation: nativeInstallation,
             containerInstallation: containerInstallation
@@ -1224,7 +1234,7 @@ final class AppGlobals: ObservableObject {
                 SteamClientSession(
                     identity: $0,
                     steamRootURL: installation.steamRootURL,
-                    source: .crossOverBottle(installation.bottleURL),
+                    source: containerSource ?? .crossOverBottle(installation.bottleURL),
                     clientKind: .container
                 )
             }

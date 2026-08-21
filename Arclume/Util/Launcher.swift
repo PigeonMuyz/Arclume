@@ -114,6 +114,23 @@ func quitSteam(cxAppPath: String, bottleName: String, isNative: Bool) async thro
             steamApp.terminate() // polite request to quit
         }
     } else {
+        if StandardGameRuntimeKind.selected() == .bundledWine,
+           let bottleURL = OnlineGameDiscovery.selectedBottleURL(from: bottleName)
+        {
+            let configuration = try BundledWineRuntime.makeDefaultLaunchConfiguration()
+            var environment = configuration.environment
+            environment["WINEPREFIX"] = bottleURL.path
+            let process = Process()
+            process.executableURL = configuration.wineURL
+            process.arguments = ["wineserver", "-k"]
+            process.currentDirectoryURL = configuration.runtimeURL
+            process.environment = environment
+            process.standardInput = FileHandle.nullDevice
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            return
+        }
         try safeShell("\(cxAppPath)/Contents/SharedSupport/CrossOver/bin/wine --bottle \(bottleName) \"C:\\Program Files (x86)\\Steam\\Steam.exe\" -shutdown")
     }
 }
@@ -188,6 +205,39 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
     guard let options else { throw CocoaError(.fileNoSuchFile) }
     guard let bottleURL = OnlineGameDiscovery.selectedBottleURL(from: selectedBottle) else {
         throw CocoaError(.fileNoSuchFile)
+    }
+    if StandardGameRuntimeKind.selected() == .bundledWine {
+        guard BundledWineRuntime.ownsStandardSteamPrefix(bottleURL),
+              BundledWineRuntime.isValidPrefix(at: bottleURL)
+        else {
+            throw BundledWineRuntimeError.invalidPrefix
+        }
+        try applyWindowsInputOptions(to: bottleURL, options: options)
+        let configuration = try BundledWineRuntime.makeLaunchConfiguration(options: options)
+        var environment = configuration.environment
+        environment["WINEPREFIX"] = bottleURL.path
+        let steamBootOptions = [
+            "-nochatui", "-nofriendsui", "-silent", "-no-browser",
+            "-no-cef-sandbox", "-skipinitialbootstrap"
+        ]
+        let extraArguments = options.gameArguments.split(
+            whereSeparator: { $0.isWhitespace }
+        ).map(String.init)
+        let target = appExeURL?.path(percentEncoded: false) ?? steamExePath
+        let arguments = appExeURL == nil
+            ? [target] + steamBootOptions + ["-applaunch", id] + extraArguments
+            : [target] + extraArguments
+        let process = Process()
+        process.executableURL = configuration.wineURL
+        process.arguments = arguments
+        process.currentDirectoryURL = appExeURL?.deletingLastPathComponent()
+            ?? URL(fileURLWithPath: steamExePath).deletingLastPathComponent()
+        process.environment = environment
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        return
     }
     guard let cxAppPath else { throw CocoaError(.fileNoSuchFile) }
     try applyWindowsInputOptions(to: bottleURL, options: options)

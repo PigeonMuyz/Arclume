@@ -12,6 +12,11 @@ nonisolated struct ContainerSteamLaunchRequest: Equatable, Sendable {
     let environmentOverrides: [String: String]
 }
 
+enum ContainerSteamRuntime {
+    case crossOver(URL)
+    case bundledWine
+}
+
 nonisolated protocol ContainerSteamProcessLaunching {
     @discardableResult
     func launch(_ request: ContainerSteamLaunchRequest) throws -> Process
@@ -170,9 +175,19 @@ nonisolated struct ContainerSteamService {
         in installation: ContainerSteamInstallation,
         using crossOverAppURL: URL
     ) throws -> ContainerSteamLaunchRequest {
+        try makeOpenSteamRequest(
+            in: installation,
+            using: .crossOver(crossOverAppURL)
+        )
+    }
+
+    func makeOpenSteamRequest(
+        in installation: ContainerSteamInstallation,
+        using runtime: ContainerSteamRuntime
+    ) throws -> ContainerSteamLaunchRequest {
         try makeLaunchRequest(
             in: installation,
-            using: crossOverAppURL,
+            using: runtime,
             steamArguments: []
         )
     }
@@ -182,12 +197,24 @@ nonisolated struct ContainerSteamService {
         in installation: ContainerSteamInstallation,
         using crossOverAppURL: URL
     ) throws -> ContainerSteamLaunchRequest {
+        try makeInstallRequest(
+            appID: appID,
+            in: installation,
+            using: .crossOver(crossOverAppURL)
+        )
+    }
+
+    func makeInstallRequest(
+        appID: Int,
+        in installation: ContainerSteamInstallation,
+        using runtime: ContainerSteamRuntime
+    ) throws -> ContainerSteamLaunchRequest {
         guard appID > 0 else {
             throw ContainerSteamServiceError.invalidAppID(appID)
         }
         return try makeLaunchRequest(
             in: installation,
-            using: crossOverAppURL,
+            using: runtime,
             steamArguments: ["steam://install/\(appID)"]
         )
     }
@@ -201,6 +228,14 @@ nonisolated struct ContainerSteamService {
     }
 
     @discardableResult
+    func openSteam(
+        in installation: ContainerSteamInstallation,
+        using runtime: ContainerSteamRuntime
+    ) throws -> Process {
+        try processLauncher.launch(makeOpenSteamRequest(in: installation, using: runtime))
+    }
+
+    @discardableResult
     func install(
         appID: Int,
         in installation: ContainerSteamInstallation,
@@ -211,9 +246,20 @@ nonisolated struct ContainerSteamService {
         )
     }
 
+    @discardableResult
+    func install(
+        appID: Int,
+        in installation: ContainerSteamInstallation,
+        using runtime: ContainerSteamRuntime
+    ) throws -> Process {
+        try processLauncher.launch(
+            makeInstallRequest(appID: appID, in: installation, using: runtime)
+        )
+    }
+
     private func makeLaunchRequest(
         in installation: ContainerSteamInstallation,
-        using crossOverAppURL: URL,
+        using runtime: ContainerSteamRuntime,
         steamArguments: [String]
     ) throws -> ContainerSteamLaunchRequest {
         guard !installation.bottleURL.lastPathComponent.isEmpty else {
@@ -223,30 +269,42 @@ nonisolated struct ContainerSteamService {
             throw ContainerSteamServiceError.steamExecutableMissing(installation.steamExecutableURL)
         }
 
-        let wineURL =
-            crossOverAppURL
-            .appendingPathComponent("Contents", isDirectory: true)
-            .appendingPathComponent("SharedSupport", isDirectory: true)
-            .appendingPathComponent("CrossOver", isDirectory: true)
-            .appendingPathComponent("bin", isDirectory: true)
-            .appendingPathComponent("wine")
-        guard isRegularFile(wineURL) else {
-            throw ContainerSteamServiceError.crossOverWineMissing(wineURL)
+        switch runtime {
+        case .crossOver(let crossOverAppURL):
+            let wineURL = crossOverAppURL
+                .appendingPathComponent("Contents/SharedSupport/CrossOver/bin/wine")
+            guard isRegularFile(wineURL) else {
+                throw ContainerSteamServiceError.crossOverWineMissing(wineURL)
+            }
+            return ContainerSteamLaunchRequest(
+                executableURL: wineURL,
+                arguments: [
+                    "--bottle",
+                    installation.bottleURL.lastPathComponent,
+                    installation.steamExecutableURL.path,
+                ] + steamArguments,
+                currentDirectoryURL: installation.steamRootURL,
+                environmentOverrides: [
+                    "CX_GRAPHICS_BACKEND": "d3dmetal",
+                    "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS": "0",
+                ]
+            )
+        case .bundledWine:
+            guard BundledWineRuntime.ownsStandardSteamPrefix(installation.bottleURL),
+                  BundledWineRuntime.isValidPrefix(at: installation.bottleURL)
+            else {
+                throw ContainerSteamServiceError.invalidBottle(installation.bottleURL)
+            }
+            let configuration = try BundledWineRuntime.makeDefaultLaunchConfiguration()
+            var environment = configuration.environment
+            environment["WINEPREFIX"] = installation.bottleURL.path
+            return ContainerSteamLaunchRequest(
+                executableURL: configuration.wineURL,
+                arguments: [installation.steamExecutableURL.path] + steamArguments,
+                currentDirectoryURL: installation.steamRootURL,
+                environmentOverrides: environment
+            )
         }
-
-        return ContainerSteamLaunchRequest(
-            executableURL: wineURL,
-            arguments: [
-                "--bottle",
-                installation.bottleURL.lastPathComponent,
-                installation.steamExecutableURL.path,
-            ] + steamArguments,
-            currentDirectoryURL: installation.steamRootURL,
-            environmentOverrides: [
-                "CX_GRAPHICS_BACKEND": "d3dmetal",
-                "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS": "0",
-            ]
-        )
     }
 
     private func normalizeOverride(_ overrideURL: URL) -> URL {
