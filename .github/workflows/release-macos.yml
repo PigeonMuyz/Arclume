@@ -202,14 +202,18 @@ jobs:
             "$full_dmg_path"
           hdiutil verify "$full_dmg_path"
 
-          # Keep the release runner from allocating a second full copy of the bundled
-          # runtime.  full_app_path and RUNNER_TEMP are on the same APFS volume, so
-          # clonefile keeps this operation copy-on-write until the archive is removed.
-          cp -cR "$full_app_path" "$lite_app_path"
+          # Build a lightweight staging App through hard links, so removing the
+          # bundled Runtime only unlinks its staged path instead of duplicating the
+          # complete App on the release runner.
+          test ! -e "$lite_app_path"
+          mkdir -p "$lite_app_path"
+          rsync -aE --link-dest="$full_app_path" "$full_app_path/" "$lite_app_path/"
           runtime_manifest="Arclume/Resources/OnlineGameDependencies/arclume-wine-runtime.json"
           runtime_archive_name=$(plutil -extract archive.name raw "$runtime_manifest")
           runtime_archive="$lite_app_path/Contents/Resources/OnlineGameDependencies/$runtime_archive_name"
           test -f "$runtime_archive"
+          runtime_archive_link_count=$(stat -f '%l' "$runtime_archive")
+          test "$runtime_archive_link_count" -ge 2
           rm -f "$runtime_archive"
           hdiutil create \
             -volname "Arclume" \
