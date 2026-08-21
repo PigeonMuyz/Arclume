@@ -211,7 +211,9 @@ jobs:
           # tree on a runner with limited temporary storage.
           runtime_manifest="Arclume/Resources/OnlineGameDependencies/arclume-wine-runtime.json"
           runtime_archive_name=$(plutil -extract archive.name raw "$runtime_manifest")
-          runtime_archive="$full_app_path/Contents/Resources/OnlineGameDependencies/$runtime_archive_name"
+          # Xcode flattens this synchronized resource directory into the bundle's
+          # Resources root.  Use the archived App layout rather than the source path.
+          runtime_archive="$full_app_path/Contents/Resources/$runtime_archive_name"
           runtime_archive_staging="$package_root/$runtime_archive_name"
           test -f "$runtime_archive"
           restore_runtime_archive() {
