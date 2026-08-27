@@ -143,6 +143,23 @@ struct LibraryPage: View {
                     load: load
                 )
             }
+            .alert(
+                "无法启动剑网3",
+                isPresented: Binding(
+                    get: { libraryPageGlobals.launchErrorMessage != nil },
+                    set: { isPresented in
+                        if !isPresented {
+                            libraryPageGlobals.launchErrorMessage = nil
+                        }
+                    }
+                )
+            ) {
+                Button("好", role: .cancel) {
+                    libraryPageGlobals.launchErrorMessage = nil
+                }
+            } message: {
+                Text(libraryPageGlobals.launchErrorMessage ?? "")
+            }
             .sheet(isPresented: $libraryPageGlobals.showTools) {
                 ToolsView(load: load)
             }

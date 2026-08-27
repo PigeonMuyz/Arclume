@@ -23,6 +23,11 @@ struct LibraryTitlebar: ToolbarContent {
         !libraryPageGlobals.allGames.isEmpty
     }
 
+    private var onlineGameIsRunning: Bool {
+        libraryPageGlobals.playingID == OnlineGameMode.jx3GameID
+            || libraryPageGlobals.jx3RuntimeActivity.state != .idle
+    }
+
     var body: some ToolbarContent {
         if isOnlineMode {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -36,9 +41,14 @@ struct LibraryTitlebar: ToolbarContent {
                 Button {
                     forceQuitOnlineGame()
                 } label: {
-                    Image(systemName: "exclamationmark.octagon")
+                    Image(systemName: onlineGameIsRunning ? "stop.fill" : "exclamationmark.octagon")
                 }
-                .help("强制退出当前 Games 容器中的剑网3启动器与游戏")
+                .help(
+                    onlineGameIsRunning
+                        ? "停止当前 Games 容器中的剑网3启动器与游戏"
+                        : "强制退出当前 Games 容器中的剑网3启动器与游戏"
+                )
+                .accessibilityLabel(onlineGameIsRunning ? "停止游戏" : "强制退出游戏")
 
                 if OnlineGameRuntimeKind.selected() == .crossOver,
                    let cxPath = appGlobals.cxAppPath {

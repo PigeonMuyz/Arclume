@@ -268,7 +268,7 @@ struct BundledWineRuntimeTests {
         ))
     }
 
-    @Test func d3dMetalModulesPrecedeWineBuiltinsAndExposeActiveBackend() {
+    @Test func d3dMetalUsesTheRuntimeModuleDirectoriesAndExposesActiveBackend() {
         let runtime = URL(fileURLWithPath: "/tmp/procyon-runtime", isDirectory: true)
         let graphicsRoot = URL(fileURLWithPath: "/tmp/d3dMetal4", isDirectory: true)
         let graphicsWine = graphicsRoot.appendingPathComponent("wine", isDirectory: true)
@@ -282,7 +282,8 @@ struct BundledWineRuntimeTests {
         )
 
         #expect(environment["WINEDLLPATH"] == [
-            graphicsWine.path,
+            runtime.appendingPathComponent("lib/wine/x86_64-windows").path,
+            runtime.appendingPathComponent("lib/wine/i386-windows").path,
             runtime.appendingPathComponent("lib/wine").path
         ].joined(separator: ":"))
         #expect(environment["DYLD_FALLBACK_LIBRARY_PATH"] == [
@@ -292,6 +293,8 @@ struct BundledWineRuntimeTests {
         ].joined(separator: ":"))
         #expect(environment["CX_GRAPHICS_BACKEND"] == "d3dmetal")
         #expect(environment["CX_ACTIVE_GRAPHICS_BACKEND"] == "d3dmetal")
+        #expect(environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] == graphicsRoot
+            .appendingPathComponent("external/libd3dshared.dylib").path)
         #expect(environment["D3DM_MTL4"] == "1")
     }
 
@@ -308,7 +311,11 @@ struct BundledWineRuntimeTests {
             d3dMetal4Enabled: false
         )
 
-        #expect(environment["WINEDLLPATH"] == runtime.appendingPathComponent("lib/wine").path)
+        #expect(environment["WINEDLLPATH"] == [
+            runtime.appendingPathComponent("lib/wine/x86_64-windows").path,
+            runtime.appendingPathComponent("lib/wine/i386-windows").path,
+            runtime.appendingPathComponent("lib/wine").path
+        ].joined(separator: ":"))
         #expect(environment["PROCYON_DLL_PATH"] == "")
         #expect(environment["DYLD_FALLBACK_LIBRARY_PATH"] == runtime.appendingPathComponent("lib64").path)
         #expect(environment["CX_GRAPHICS_BACKEND"] == "dxvk")

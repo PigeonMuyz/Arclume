@@ -349,10 +349,10 @@ enum BundledWineRuntimeError: LocalizedError {
     }
 }
 
-/// Keeps the bundled runtime immutable after extraction. D3DMetal remains in
-/// the existing versioned archives and is selected by prepending its Wine
-/// module directory to WINEDLLPATH, so switching D3DMetal 3/4 never mutates
-/// this runtime or CrossOver.
+/// Keeps the bundled runtime separate from all user data. D3DMetal modules
+/// are installed into the runtime's Wine module directories because Wine
+/// resolves built-in modules from that layout rather than from a standalone
+/// archive path. The Games prefix and game files are never modified here.
 enum BundledWineRuntime {
     typealias ProgressHandler = @Sendable (_ fraction: Double, _ label: String) -> Void
 
@@ -408,6 +408,12 @@ enum BundledWineRuntime {
     }
 
     private static let installationLock = NSLock()
+    private static let graphicsModuleInstallationLock = NSLock()
+    private static let graphicsModuleMarkerFileName = ".arclume-d3dmetal-version"
+    private static let graphicsModuleDirectoryNames = [
+        "x86_64-windows",
+        "x86_64-unix"
+    ]
 
     nonisolated static var installationURL: URL {
         ARCLUME_SUPPORT_FOLDER_URL
@@ -867,9 +873,20 @@ enum BundledWineRuntime {
             )
         }
         let graphicsWineURL = graphicsRootURL.appendingPathComponent("wine", isDirectory: true)
-        guard FileManager.default.fileExists(atPath: graphicsWineURL.path) else {
+        let d3dSharedURL = graphicsRootURL.appendingPathComponent(
+            "external/libd3dshared.dylib",
+            isDirectory: false
+        )
+        guard FileManager.default.fileExists(atPath: graphicsWineURL.path),
+              FileManager.default.fileExists(atPath: d3dSharedURL.path)
+        else {
             throw BundledOnlineGameResourceError.invalidArchive("d3dMetal\(d3dMetalVersion)")
         }
+        try installD3DMetalModules(
+            from: graphicsWineURL,
+            into: runtimeURL,
+            version: d3dMetalVersion
+        )
 
         var environment = ProcessInfo.processInfo.environment
         environment["WINEDATADIR"] = runtimeURL.appendingPathComponent("share/wine").path
@@ -901,10 +918,10 @@ enum BundledWineRuntime {
         )
     }
 
-    /// Direct Wine does not consume Procyon's legacy DLL-path marker. Its
-    /// loader only honours WINEDLLPATH, so D3DMetal must be first in that
-    /// search path for its d3d11/dxgi modules to replace Wine's built-ins.
-    /// Keep the Wine runtime second so all non-D3DMetal modules remain intact.
+    /// The Windows and Unix D3DMetal modules are installed into the selected
+    /// runtime before launch. WINEDLLPATH therefore points at Wine's own
+    /// architecture-specific directories, which is where Wine resolves
+    /// built-in `d3d11.dll` and `dxgi.dll`.
     nonisolated static func graphicsRuntimeEnvironment(
         runtimeURL: URL,
         graphicsRootURL: URL,
@@ -912,12 +929,14 @@ enum BundledWineRuntime {
         graphicsBackend: String,
         d3dMetal4Enabled: Bool
     ) -> [String: String] {
-        let wineModulePath = runtimeURL.appendingPathComponent("lib/wine").path
+        let wineModuleURL = runtimeURL.appendingPathComponent("lib/wine", isDirectory: true)
         let usesD3DMetal = graphicsBackend.contains("d3dmetal")
         let activeBackend = usesD3DMetal ? "d3dmetal" : graphicsBackend
-        let wineDLLPath = usesD3DMetal
-            ? [graphicsWineURL.path, wineModulePath].joined(separator: ":")
-            : wineModulePath
+        let wineDLLPaths = [
+            wineModuleURL.appendingPathComponent("x86_64-windows").path,
+            wineModuleURL.appendingPathComponent("i386-windows").path,
+            wineModuleURL.path
+        ]
         let fallbackLibraries = usesD3DMetal
             ? [
                 graphicsRootURL.appendingPathComponent("external").path,
@@ -927,11 +946,22 @@ enum BundledWineRuntime {
             : [runtimeURL.appendingPathComponent("lib64").path]
 
         return [
-            "WINEDLLPATH": wineDLLPath,
-            // Retained in diagnostic logs and for existing user tooling. Wine
-            // itself selects the modules through WINEDLLPATH above.
+            "WINEDLLPATH": wineDLLPaths.joined(separator: ":"),
             "PROCYON_DLL_PATH": usesD3DMetal ? graphicsWineURL.path : "",
-            // d3d11.so/dxgi.so resolve libd3dshared.dylib from this directory.
+            // Mirrors CrossOver's explicit GPTK dependency handoff.
+            "CX_APPLEGPTK_LIBD3DSHARED_PATH": usesD3DMetal
+                ? graphicsRootURL.appendingPathComponent("external/libd3dshared.dylib").path
+                : "",
+            // GPTK 4's libd3dshared chooses its framework through this
+            // explicit path before falling back to the system framework
+            // location. The bundled framework is intentionally outside the
+            // runtime module directory, so it must be handed off directly.
+            "D3DMETAL_FRAMEWORK_PATH": usesD3DMetal
+                ? graphicsRootURL.appendingPathComponent(
+                    "external/D3DMetal.framework/D3DMetal"
+                ).path
+                : "",
+            // d3d11.so/dxgi.so also resolve libd3dshared.dylib from this directory.
             "DYLD_FALLBACK_LIBRARY_PATH": fallbackLibraries.joined(separator: ":"),
             "CX_GRAPHICS_BACKEND": activeBackend,
             // CrossOver normally derives this through cxcompatdb. The bundled
@@ -943,6 +973,132 @@ enum BundledWineRuntime {
             "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS": "1",
             "MVK_CONFIG_LOG_LEVEL": "0"
         ]
+    }
+
+    /// Wine's built-in module resolver selects files from `lib/wine`, even
+    /// when WINEDLLPATH names a separate archive. Install the D3DMetal module
+    /// pair atomically into the disposable runtime instead of copying either
+    /// the Games prefix or any game resource.
+    nonisolated private static func installD3DMetalModules(
+        from graphicsWineURL: URL,
+        into runtimeURL: URL,
+        version: String
+    ) throws {
+        graphicsModuleInstallationLock.lock()
+        defer { graphicsModuleInstallationLock.unlock() }
+
+        let fileManager = FileManager.default
+        var modulePairs: [(source: URL, sourceContent: URL, destination: URL)] = []
+        for directoryName in graphicsModuleDirectoryNames {
+            let sourceDirectoryURL = graphicsWineURL.appendingPathComponent(
+                directoryName,
+                isDirectory: true
+            )
+            let destinationDirectoryURL = runtimeURL.appendingPathComponent(
+                "lib/wine/\(directoryName)",
+                isDirectory: true
+            )
+            guard fileManager.fileExists(atPath: sourceDirectoryURL.path),
+                  fileManager.fileExists(atPath: destinationDirectoryURL.path)
+            else {
+                throw BundledOnlineGameResourceError.invalidArchive("d3dMetal\(version)")
+            }
+
+            let sourceURLs = try fileManager.contentsOfDirectory(
+                at: sourceDirectoryURL,
+                includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles]
+            )
+            let moduleSources = sourceURLs.compactMap { sourceURL -> (source: URL, content: URL)? in
+                guard let values = try? sourceURL.resourceValues(
+                    forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
+                ), values.isRegularFile == true || values.isSymbolicLink == true
+                else {
+                    return nil
+                }
+
+                // GPTK's Unix modules are symbolic links to
+                // libd3dshared.dylib. The runtime has a different directory
+                // layout, so copy the target's contents rather than a broken
+                // relative symlink.
+                let contentURL = values.isSymbolicLink == true
+                    ? sourceURL.resolvingSymlinksInPath()
+                    : sourceURL
+                guard (try? contentURL.resourceValues(
+                    forKeys: [.isRegularFileKey]
+                ).isRegularFile) == true else {
+                    return nil
+                }
+                return (sourceURL, contentURL)
+            }
+            guard !moduleSources.isEmpty else {
+                throw BundledOnlineGameResourceError.invalidArchive("d3dMetal\(version)")
+            }
+            modulePairs += moduleSources.map { source in
+                (
+                    source: source.source,
+                    sourceContent: source.content,
+                    destination: destinationDirectoryURL.appendingPathComponent(
+                        source.source.lastPathComponent
+                    )
+                )
+            }
+        }
+
+        let requiredModuleNames: Set<String> = ["d3d11.dll", "dxgi.dll", "d3d11.so", "dxgi.so"]
+        guard requiredModuleNames.isSubset(of: Set(modulePairs.map { $0.source.lastPathComponent })) else {
+            throw BundledOnlineGameResourceError.invalidArchive("d3dMetal\(version)")
+        }
+
+        let markerURL = runtimeURL.appendingPathComponent(graphicsModuleMarkerFileName)
+        let expectedMarker = "d3dmetal\(version)\n"
+        if (try? String(contentsOf: markerURL, encoding: .utf8)) == expectedMarker,
+           modulePairs.allSatisfy({ pair in
+               fileManager.contentsEqual(atPath: pair.sourceContent.path, andPath: pair.destination.path)
+           }) {
+            return
+        }
+
+        let stagingURL = runtimeURL.appendingPathComponent(
+            ".arclume-d3dmetal-staging-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(at: stagingURL, withIntermediateDirectories: true)
+        defer { try? fileManager.removeItem(at: stagingURL) }
+
+        for pair in modulePairs {
+            let relativeDirectory = pair.source.deletingLastPathComponent().lastPathComponent
+            let stagedDirectoryURL = stagingURL.appendingPathComponent(relativeDirectory, isDirectory: true)
+            try fileManager.createDirectory(at: stagedDirectoryURL, withIntermediateDirectories: true)
+            try fileManager.copyItem(
+                at: pair.sourceContent,
+                to: stagedDirectoryURL.appendingPathComponent(pair.source.lastPathComponent)
+            )
+        }
+
+        for pair in modulePairs {
+            let relativeDirectory = pair.source.deletingLastPathComponent().lastPathComponent
+            let stagedURL = stagingURL
+                .appendingPathComponent(relativeDirectory, isDirectory: true)
+                .appendingPathComponent(pair.source.lastPathComponent)
+            if fileManager.fileExists(atPath: pair.destination.path) {
+                try fileManager.replaceItemAt(
+                    pair.destination,
+                    withItemAt: stagedURL,
+                    backupItemName: nil,
+                    options: []
+                )
+            } else {
+                try fileManager.moveItem(at: stagedURL, to: pair.destination)
+            }
+        }
+
+        guard modulePairs.allSatisfy({ pair in
+            fileManager.contentsEqual(atPath: pair.sourceContent.path, andPath: pair.destination.path)
+        }) else {
+            throw BundledOnlineGameResourceError.invalidArchive("d3dMetal\(version)")
+        }
+        try expectedMarker.write(to: markerURL, atomically: true, encoding: .utf8)
     }
 
     nonisolated private static func requiredRuntimeManifest() throws -> ArclumeRuntimeManifest {
@@ -1037,6 +1193,7 @@ enum BundledWineRuntime {
             "WINEDLLPATH",
             "WINESERVER",
             "PROCYON_DLL_PATH",
+            "CX_APPLEGPTK_LIBD3DSHARED_PATH",
             "DYLD_FALLBACK_LIBRARY_PATH",
             "WINEMSYNC",
             "CX_GRAPHICS_BACKEND",
@@ -1097,6 +1254,7 @@ enum BundledWineRuntime {
             "WINEDLLPATH",
             "WINESERVER",
             "PROCYON_DLL_PATH",
+            "CX_APPLEGPTK_LIBD3DSHARED_PATH",
             "DYLD_FALLBACK_LIBRARY_PATH",
             "WINEDEBUG",
             "WINEMSYNC",

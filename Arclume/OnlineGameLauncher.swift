@@ -462,8 +462,14 @@ enum OnlineGameLauncher {
         } catch {
             console.warn("剑网3 DLSS 帧生成配置暂时无法写入：\(error.localizedDescription)")
         }
-        if try BundledOnlineGameResources.installNVNGX(into: bottleURL) {
-            console.log("已将内置 NVNGX DLL 替换到剑网3客户端目录")
+        do {
+            if try BundledOnlineGameResources.installNVNGX(into: bottleURL) {
+                console.log("已将内置 NVNGX DLL 替换到剑网3客户端目录")
+            }
+        } catch {
+            // The launcher may already have a working NVNGX pair. A failed
+            // best-effort refresh must not prevent Wine itself from starting.
+            console.warn("剑网3 NVNGX 更新暂时无法完成：\(error.localizedDescription)")
         }
         return try launchExecutable(
             executableURL,

@@ -856,35 +856,42 @@ struct JX3LauncherHomeView: View {
                 .disabled(isLaunching)
             }
 
-            Button {
-                if hasConfirmedJX3Runtime {
-                    onStop?()
-                } else if !isStartingJX3Runtime {
-                    persistJX3Options()
-                    onLaunch()
-                }
-            } label: {
-                Group {
+            // The online home screen exposes its stop action from the window
+            // toolbar, alongside CrossOver's existing container-stop action.
+            // Keep the card's primary action for launching only; a transient
+            // launch state remains visible until process monitoring confirms
+            // that Wine is alive.
+            if !hasConfirmedJX3Runtime || showsCloseButton {
+                Button {
                     if hasConfirmedJX3Runtime {
-                        Label("停止游戏", systemImage: "stop.fill")
-                    } else if isStartingJX3Runtime {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(.white)
-                            Text("正在启动…")
-                        }
-                    } else {
-                        Label("打开启动器", systemImage: "play.fill")
+                        onStop?()
+                    } else if !isStartingJX3Runtime {
+                        persistJX3Options()
+                        onLaunch()
                     }
+                } label: {
+                    Group {
+                        if hasConfirmedJX3Runtime {
+                            Label("停止游戏", systemImage: "stop.fill")
+                        } else if isStartingJX3Runtime {
+                            HStack(spacing: 10) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                    .tint(.white)
+                                Text("正在启动…")
+                            }
+                        } else {
+                            Label("打开启动器", systemImage: "play.fill")
+                        }
+                    }
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 5)
                 }
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 5)
+                .buttonStyle(.borderedProminent)
+                .tint(.arclumeSecondary)
+                .disabled(isStartingJX3Runtime)
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.arclumeSecondary)
-            .disabled(isStartingJX3Runtime)
 
             if isPlaying {
                 Label(runtimeActivity.state.title, systemImage: runtimeActivity.state.systemImage)
