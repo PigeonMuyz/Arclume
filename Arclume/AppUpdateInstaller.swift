@@ -4,7 +4,6 @@
 //
 
 import Foundation
-import Security
 
 nonisolated enum ArclumeAppUpdateInstallationResult: Sendable {
     case installed(URL)
@@ -14,7 +13,6 @@ nonisolated enum ArclumeAppUpdateInstallationError: LocalizedError {
     case cannotMount
     case appMissing
     case invalidIdentityOrVersion
-    case invalidSignature
     case installationFailed(String)
 
     var errorDescription: String? {
@@ -25,8 +23,6 @@ nonisolated enum ArclumeAppUpdateInstallationError: LocalizedError {
             "更新磁盘映像中未找到 Arclume.app。"
         case .invalidIdentityOrVersion:
             "更新 App 的标识或版本不正确。"
-        case .invalidSignature:
-            "更新 App 未通过 Arclume 开发者签名验证。"
         case .installationFailed(let message):
             "无法自动安装更新：\(message)"
         }
@@ -34,8 +30,9 @@ nonisolated enum ArclumeAppUpdateInstallationError: LocalizedError {
 }
 
 /// Fankit-style in-place updater. The update image is mounted read-only, and
-/// the contained application must satisfy the current application's exact
-/// bundle identifier and signing-team requirement before any replacement.
+/// the contained application must match the GitHub Release's exact bundle ID
+/// and newer version before any replacement. Download integrity is checked by
+/// the Release asset SHA-256 before this installer is invoked.
 nonisolated enum ArclumeAppUpdateInstaller {
     static func install(
         diskImageURL: URL,
@@ -47,13 +44,6 @@ nonisolated enum ArclumeAppUpdateInstaller {
     ) throws -> ArclumeAppUpdateInstallationResult {
         let currentAppURL = currentAppURL.standardizedFileURL.resolvingSymlinksInPath()
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? "io.github.pigeonmuyz.arclume"
-        guard let teamIdentifier = ArclumeAppCodeSigning.teamIdentifier() else {
-            throw ArclumeAppUpdateInstallationError.invalidSignature
-        }
-        let requirement = ArclumeAppCodeSigning.requirement(
-            identifier: bundleIdentifier,
-            teamIdentifier: teamIdentifier
-        )
 
         let mountPoint = try mount(diskImageURL)
         defer { try? eject(mountPoint) }
@@ -67,8 +57,7 @@ nonisolated enum ArclumeAppUpdateInstaller {
             releaseBuild: releaseBuild,
             currentVersion: currentVersion,
             currentBuild: currentBuild,
-            bundleIdentifier: bundleIdentifier,
-            codeSigningRequirement: requirement
+            bundleIdentifier: bundleIdentifier
         )
 
         let parentURL = currentAppURL.deletingLastPathComponent()
@@ -87,8 +76,7 @@ nonisolated enum ArclumeAppUpdateInstaller {
             releaseBuild: releaseBuild,
             currentVersion: currentVersion,
             currentBuild: currentBuild,
-            bundleIdentifier: bundleIdentifier,
-            codeSigningRequirement: requirement
+            bundleIdentifier: bundleIdentifier
         )
         return .installed(currentAppURL)
     }
@@ -100,8 +88,7 @@ nonisolated enum ArclumeAppUpdateInstaller {
         releaseBuild: String?,
         currentVersion: String,
         currentBuild: String,
-        bundleIdentifier: String,
-        codeSigningRequirement: String
+        bundleIdentifier: String
     ) throws {
         let fileManager = FileManager.default
         let parentURL = currentAppURL.deletingLastPathComponent()
@@ -119,8 +106,7 @@ nonisolated enum ArclumeAppUpdateInstaller {
                 releaseBuild: releaseBuild,
                 currentVersion: currentVersion,
                 currentBuild: currentBuild,
-                bundleIdentifier: bundleIdentifier,
-                codeSigningRequirement: codeSigningRequirement
+                bundleIdentifier: bundleIdentifier
             )
             _ = try fileManager.replaceItemAt(currentAppURL, withItemAt: stagingURL)
         } catch let error as ArclumeAppUpdateInstallationError {
@@ -132,8 +118,7 @@ nonisolated enum ArclumeAppUpdateInstaller {
 
     /// Arclume does not install a persistent privileged service. For an app
     /// located in /Applications this asks macOS once for administrator access
-    /// and performs the same staged replacement while the already-validated,
-    /// read-only update image remains mounted.
+    /// and performs the same staged replacement from the read-only update image.
     private static func replaceUsingAdministratorPrivileges(
         updateAppURL: URL,
         currentAppURL: URL
@@ -199,8 +184,7 @@ nonisolated enum ArclumeAppUpdateInstaller {
         releaseBuild: String?,
         currentVersion: String,
         currentBuild: String,
-        bundleIdentifier: String,
-        codeSigningRequirement: String
+        bundleIdentifier: String
     ) throws {
         let infoURL = appURL.appendingPathComponent("Contents/Info.plist")
         guard let info = NSDictionary(contentsOf: infoURL) as? [String: Any],
@@ -224,31 +208,6 @@ nonisolated enum ArclumeAppUpdateInstaller {
                 && (releaseBuild.flatMap(Int.init) ?? 0) > (Int(currentBuild) ?? 0))
         guard isNewer else {
             throw ArclumeAppUpdateInstallationError.invalidIdentityOrVersion
-        }
-
-        var staticCode: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(appURL as CFURL, [], &staticCode) == errSecSuccess,
-              let staticCode
-        else {
-            throw ArclumeAppUpdateInstallationError.invalidSignature
-        }
-        var requirement: SecRequirement?
-        guard SecRequirementCreateWithString(
-            codeSigningRequirement as CFString,
-            [],
-            &requirement
-        ) == errSecSuccess,
-            let requirement
-        else {
-            throw ArclumeAppUpdateInstallationError.invalidSignature
-        }
-        let flags = SecCSFlags(rawValue:
-            UInt32(kSecCSStrictValidate)
-                | UInt32(kSecCSCheckAllArchitectures)
-                | UInt32(kSecCSCheckNestedCode)
-        )
-        guard SecStaticCodeCheckValidity(staticCode, flags, requirement) == errSecSuccess else {
-            throw ArclumeAppUpdateInstallationError.invalidSignature
         }
     }
 
@@ -281,31 +240,5 @@ nonisolated enum ArclumeAppUpdateInstaller {
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escaped)\""
-    }
-}
-
-nonisolated enum ArclumeAppCodeSigning {
-    static func teamIdentifier() -> String? {
-        var code: SecCode?
-        if SecCodeCopySelf([], &code) == errSecSuccess, let code {
-            var staticCode: SecStaticCode?
-            if SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess,
-               let staticCode
-            {
-                var information: CFDictionary?
-                let flags = SecCSFlags(rawValue: kSecCSSigningInformation)
-                if SecCodeCopySigningInformation(staticCode, flags, &information) == errSecSuccess,
-                   let dictionary = information as? [CFString: Any],
-                   let teamIdentifier = dictionary[kSecCodeInfoTeamIdentifier] as? String
-                {
-                    return teamIdentifier
-                }
-            }
-        }
-        return nil
-    }
-
-    static func requirement(identifier: String, teamIdentifier: String) -> String {
-        "anchor apple generic and identifier \"\(identifier)\" and certificate leaf[subject.OU] = \"\(teamIdentifier)\""
     }
 }

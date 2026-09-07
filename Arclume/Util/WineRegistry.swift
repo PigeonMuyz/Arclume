@@ -68,6 +68,15 @@ class WineRegSection {
             values.append((key: key, value: val))
         }
     }
+
+    @discardableResult
+    func removeValue(forKey key: String) -> Bool {
+        guard let index = values.firstIndex(where: { $0.key == key }) else {
+            return false
+        }
+        values.remove(at: index)
+        return true
+    }
     
     func setDword(forKey key: String, value: UInt32) {
         guard let index = values.firstIndex(where: { $0.key == key }) else {

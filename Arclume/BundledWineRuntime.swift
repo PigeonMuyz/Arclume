@@ -753,11 +753,11 @@ enum BundledWineRuntime {
         var environment = configuration.environment
         environment["WINEPREFIX"] = stagingPrefixURL.path
         environment["WINEARCH"] = "win64"
-        // A Wine server/SEH trace can grow to several gigabytes during a
-        // normal game session. It is opt-in even for Debug builds so user
-        // diagnostics always remain bounded by Procyon's log retention.
+        // Input diagnostics are opt-in even for Debug builds. Restrict this
+        // to IME and clipboard channels: broad server/SEH tracing can grow to
+        // several gigabytes during a normal game session.
         if verboseWineTraceRequested {
-            environment["WINEDEBUG"] = "-all,+timestamp,+pid,+tid,+server,+seh"
+            environment["WINEDEBUG"] = "-all,+timestamp,+pid,+tid,+imm,+clipboard"
         }
 
         progress?(0.74, "正在创建独立的 \(containerName) 容器…")
@@ -1221,9 +1221,8 @@ enum BundledWineRuntime {
 #endif
     }
 
-    /// Verbose Wine tracing is intentionally an internal, explicit opt-in.
-    /// The normal Debug app is shared with testers, where tracing every Wine
-    /// server message would otherwise make a multi-gigabyte log file.
+    /// Focused Wine input tracing is intentionally an internal, explicit
+    /// opt-in. It records only IME and clipboard driver activity.
     nonisolated static var verboseWineTraceRequested: Bool {
 #if DEBUG
         ProcessInfo.processInfo.environment["PROCYON_ENABLE_WINE_TRACE"] == "1"

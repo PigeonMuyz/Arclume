@@ -124,7 +124,7 @@ struct OptionsView: View {
             }
             Button("取消", role: .cancel) {}
         } message: {
-            Text("将下载、校验同一开发者签名的 DMG，并自动替换当前 App 后重新启动。")
+            Text("将下载并校验 DMG 的 SHA-256，确认 Arclume 版本后自动替换当前 App 并重新启动。")
         }
     }
 

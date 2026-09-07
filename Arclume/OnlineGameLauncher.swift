@@ -446,6 +446,10 @@ enum OnlineGameLauncher {
             return activeSession
         }
 
+        if OnlineGameRuntimeKind.selected() == .bundledWine {
+            await MicrophoneAuthorization.requestForBundledWineLaunchIfNeeded()
+        }
+
         OnlineGameMode.applyDefaultRuntimePreferences(to: options)
         let installation = OnlineGameDiscovery.jx3Installation(in: bottleURL)
         guard let executableURL = installation.preferredLaunchURL else {
@@ -630,11 +634,10 @@ enum OnlineGameLauncher {
 
         var environment = configuration.environment
         environment["WINEPREFIX"] = bottleURL.path
-        // Detailed Wine server tracing is developer-only. Test builds retain
-        // their normal launch/crash diagnostics without continuously dumping
-        // every Wine server operation into the user log.
+        // Focused input tracing is developer-only. It is limited to the IME
+        // and clipboard driver channels, avoiding unbounded server tracing.
         if BundledWineRuntime.verboseWineTraceRequested {
-            environment["WINEDEBUG"] = "-all,+timestamp,+pid,+tid,+server,+seh"
+            environment["WINEDEBUG"] = "-all,+timestamp,+pid,+tid,+imm,+clipboard"
         }
 
         writeLaunchLog(

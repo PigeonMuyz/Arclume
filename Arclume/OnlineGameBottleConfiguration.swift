@@ -22,6 +22,7 @@ enum OnlineGameBottleConfiguration {
         "Software\\\\Microsoft\\\\Windows NT\\\\CurrentVersion\\\\FontSubstitutes"
     private static let internationalPath = "Control Panel\\\\International"
     private static let keyboardLayoutPath = "Keyboard Layout\\\\Preload"
+    private static let wineMacDriverPath = "Software\\\\Wine\\\\Mac Driver"
     private static let wineFontsPath = "Software\\\\Wine\\\\Fonts"
     private static let wineFontReplacementsPath =
         "Software\\\\Wine\\\\Fonts\\\\Replacements"
@@ -151,11 +152,25 @@ enum OnlineGameBottleConfiguration {
             ) || changed
         }
 
+        // winemac.drv binds Windows layouts to the currently selected macOS
+        // input source. Pinning the prefix to the Windows Simplified Chinese
+        // layout prevents that dynamic binding on some hosts, which breaks
+        // Pinyin composition. Leave the keyboard choice to the Mac driver.
         if let keyboardLayout = registry.section(
             forPath: keyboardLayoutPath,
+            createIfMissing: false
+        ) {
+            changed = keyboardLayout.removeValue(forKey: "1") || changed
+        }
+
+        // Keep Wine's key-based menu bridge. Its direct-message mode disrupts
+        // keyboard input in JX3 custom controls, so clipboard compatibility
+        // must be addressed in the Runtime without changing ordinary typing.
+        if let wineMacDriver = registry.section(
+            forPath: wineMacDriverPath,
             createIfMissing: true
         ) {
-            changed = upsert(["1": "00000804"], in: keyboardLayout) || changed
+            changed = upsert(["EditMenu": "key"], in: wineMacDriver) || changed
         }
 
         if let wineFonts = registry.section(forPath: wineFontsPath, createIfMissing: true) {

@@ -113,7 +113,7 @@ jobs:
             echo "identity=${MACOS_SIGNING_IDENTITY:-Developer ID Application}" >> "$GITHUB_OUTPUT"
           else
             echo "enabled=false" >> "$GITHUB_OUTPUT"
-            echo "发布签名凭据未配置：本次产物仅可手动安装，不能用于应用内自动更新。"
+            echo "发布签名凭据未配置：本次产物未签名、未公证，但可通过 DMG SHA-256 校验用于应用内更新。"
           fi
 
       - name: 导入 Developer ID 签名证书
@@ -302,9 +302,9 @@ jobs:
             "no-runtime SHA-256：$lite_checksum" \
             "" \
             "$(if [ "$SIGNED_RELEASE" = "true" ]; then
-                printf '%s' 'App 已使用 Developer ID 签名；尚未自动公证。应用内更新会验证同一 Team 的 App 签名。'
+                printf '%s' 'App 已使用 Developer ID 签名；尚未自动公证。应用内更新以 DMG SHA-256、Bundle ID 和版本/构建号校验后安装。'
               else
-                printf '%s' '本次未配置发布签名凭据，DMG 未签名、未公证，且不能作为应用内自动更新来源。'
+                printf '%s' '本次未配置发布签名凭据，DMG 未签名、未公证；应用内更新会在 SHA-256、Bundle ID 和版本/构建号校验后安装。'
               fi)")
 
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

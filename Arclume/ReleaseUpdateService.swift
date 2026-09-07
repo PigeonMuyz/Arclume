@@ -304,7 +304,7 @@ final class ArclumeUpdateService: ObservableObject {
             )
             defer { try? FileManager.default.removeItem(at: temporaryURL) }
 
-            applicationDownloadMessage = "正在验证签名并安装更新…"
+            applicationDownloadMessage = "正在确认版本并安装更新…"
             let currentInfo = Bundle.main.infoDictionary
             let currentVersion = currentInfo?["CFBundleShortVersionString"] as? String ?? "0"
             let currentBuild = currentInfo?["CFBundleVersion"] as? String ?? "0"

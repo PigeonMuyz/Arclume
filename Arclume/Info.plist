@@ -14,6 +14,8 @@
 	<string>$(API_PATH_CUSTOM)</string>
 	<key>API_PROTOCOL</key>
 	<string>$(API_PROTOCOL)</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Arclume 需要访问麦克风，用于 Windows 游戏及其语音聊天功能。</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

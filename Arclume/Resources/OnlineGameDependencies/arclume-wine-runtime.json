@@ -2,8 +2,9 @@
   "schemaVersion": 1,
   "id": "io.arclume.runtime.wine",
   "displayName": "Arclume Wine",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "channel": "stable",
+  "patchSet": "finewine-endfield-e5d4ccad+arclume-input-1",
   "runtimeABI": 1,
   "prefixABI": "arclume-jx3-prefix-1",
   "architecture": "x86_64",
@@ -11,8 +12,8 @@
   "legacyInstallRoots": ["procyon-wine-runtime-x86_64-v8-mono-d3dmetal4-zhcn"],
   "legacyInstallMarkers": ["wine-11.0-procyon.7"],
   "archive": {
-    "name": "arclume-wine-1.0.0-x86_64.tar.xz",
-    "sha256": "0e415ed1f29f304f8059ed6ed36f07cfd678958a9b1197cba4150dcd8a229b13",
+    "name": "arclume-wine-1.1.1-x86_64.tar.xz",
+    "sha256": "aaea92debee5611c03683e7f1fefb4608a4ed609b27a4d24d5939a2fcf19d903",
     "rootDirectory": "arclume-wine-runtime-x86_64"
   },
   "engine": {

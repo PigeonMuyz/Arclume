@@ -35,7 +35,7 @@ Release 提供两种 DMG：
 | `with-runtime` | 首次安装或需要离线初始化 Arclume Wine 的用户。 |
 | `no-runtime` | 已安装 Runtime 或希望减小下载体积的用户；可在“设置 → 更新”下载 Runtime。 |
 
-每个 DMG 都附带 SHA-256 文件。配置 Developer ID 证书的 Release 会签名 App，并支持应用内“下载、签名验证、覆盖安装、重启”更新；未配置证书的 Actions 产物只可手动安装。公证状态以对应 Release 说明为准。
+每个 DMG 都附带 SHA-256 文件。应用内更新会下载 Release 的 DMG，校验 SHA-256、Bundle ID 和版本/构建号后覆盖安装并重启；因此未配置 Developer ID 证书的 Actions 产物也可作为更新来源。Developer ID 签名与公证状态以对应 Release 说明为准。
 
 应用内更新不会覆盖用户的 `Games`、Steam 或 CrossOver 容器。Runtime 更新会检查 Manifest、ABI 与 SHA-256，并以原子替换方式更新运行时本体。
 
@@ -119,12 +119,12 @@ Arclume is an independent, community-driven macOS game launcher. It manages nati
 
 ### Distribution
 
-Each Release contains two unsigned, unnotarized DMGs and matching SHA-256 files:
+Each Release contains two DMGs and matching SHA-256 files. Developer ID signing and notarization status are stated in the corresponding Release notes:
 
 - `with-runtime` includes the verified Wine archive for first-run or offline setup.
 - `no-runtime` is smaller and is intended for users who already have a Runtime; the Runtime can be downloaded in **Settings → Updates**.
 
-Application updates never replace a user's `Games` prefix. Runtime updates validate their Manifest, ABI and SHA-256, then atomically replace only the immutable runtime files.
+Application updates verify the DMG SHA-256, bundle ID, and version/build before staging, replacing, and restarting; they do not require matching Developer ID signatures. They never replace a user's `Games` prefix. Runtime updates validate their Manifest, ABI and SHA-256, then atomically replace only the immutable runtime files.
 
 ### Contributing
 
