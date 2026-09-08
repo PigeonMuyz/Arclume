@@ -16,6 +16,8 @@ private enum JX3PostEffect: Hashable {
     case fullScreenSharpen
     case hair
     case volumetricCloud
+    case lightShafts
+    case volumetricFog
     case reflectionEnhancement
     case firework
     case screenSpaceReflection
@@ -123,6 +125,11 @@ private struct JX3OfficialQualityPreset: Identifiable {
             resourceName: "config_bd_3_junheng.ini"
         ),
         JX3OfficialQualityPreset(
+            id: "gaoxiao",
+            title: "高效",
+            resourceName: "config_5_gaoxiao.ini"
+        ),
+        JX3OfficialQualityPreset(
             id: "dianying",
             title: "电影",
             resourceName: "config_bd_6_dianying.ini"
@@ -165,493 +172,11 @@ private enum JX3QualitySection: CaseIterable, Hashable, Identifiable {
     }
 }
 
-nonisolated private struct JX3INIKey: Hashable, Sendable {
-    let section: String
-    let key: String
-}
-
-nonisolated private struct JX3INIReader: Sendable {
-    private let values: [JX3INIKey: String]
-
-    init(url: URL?) {
-        guard let url,
-              let data = try? Data(contentsOf: url)
-        else {
-            values = [:]
-            return
-        }
-
-        var parsed: [JX3INIKey: String] = [:]
-        var section = ""
-        let contents = String(decoding: data, as: UTF8.self)
-        for rawLine in contents.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            if line.hasPrefix("[") && line.hasSuffix("]") {
-                section = String(line.dropFirst().dropLast())
-                    .trimmingCharacters(in: .whitespaces)
-                continue
-            }
-            guard !line.isEmpty,
-                  !line.hasPrefix(";") && !line.hasPrefix("#"),
-                  let separator = line.firstIndex(of: "=")
-            else {
-                continue
-            }
-
-            let key = String(line[..<separator])
-                .trimmingCharacters(in: .whitespaces)
-            let value = String(line[line.index(after: separator)...])
-                .trimmingCharacters(in: .whitespaces)
-            parsed[JX3INIKey(section: section, key: key)] = value
-        }
-        values = parsed
-    }
-
-    func string(_ section: String, _ key: String) -> String? {
-        values[JX3INIKey(section: section, key: key)]
-    }
-
-    func int(_ section: String, _ key: String, default fallback: Int) -> Int {
-        Int(string(section, key) ?? "") ?? fallback
-    }
-
-    func double(_ section: String, _ key: String, default fallback: Double) -> Double {
-        Double(string(section, key) ?? "") ?? fallback
-    }
-
-    func bool(_ section: String, _ key: String, default fallback: Bool) -> Bool {
-        guard let value = string(section, key)?.lowercased() else { return fallback }
-        return value == "1" || value == "true"
-    }
-}
-
-nonisolated private enum JX3Antialiasing: String, CaseIterable, Identifiable, Sendable {
-    case disabled
-    case nis
-    case smaa
-    case dlss
-    case taa
-    case fsr
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .disabled:
-            "关闭选项"
-        case .nis:
-            "NIS图像压缩"
-        case .smaa:
-            "SMAA抗锯齿"
-        case .dlss:
-            "DLSS抗锯齿"
-        case .taa:
-            "TAA抗锯齿"
-        case .fsr:
-            "FSR锐画"
-        }
-    }
-
-    var showsUpscalingControls: Bool {
-        self == .dlss || self == .fsr
-    }
-}
-
-nonisolated private enum JX3EffectCullDistance: String, CaseIterable, Identifiable, Sendable {
-    case near
-    case far
-    case veryFar
-    case custom
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .near:
-            "近"
-        case .far:
-            "远"
-        case .veryFar:
-            "超远"
-        case .custom:
-            "自定义"
-        }
-    }
-
-    var distances: (first: Int, second: Int, third: Int)? {
-        switch self {
-        case .near:
-            (3000, 4000, 8000)
-        case .far:
-            (5000, 6000, 8000)
-        case .veryFar:
-            (4000, 5000, 8000)
-        case .custom:
-            nil
-        }
-    }
-
-    static func resolve(first: Int, second: Int, third: Int) -> JX3EffectCullDistance {
-        allCases.first { preset in
-            guard let distances = preset.distances else { return false }
-            return distances.first == first
-                && distances.second == second
-                && distances.third == third
-        } ?? .custom
-    }
-}
-
-nonisolated private enum JX3QualityConfigAntialiasing {
-    static func resolve(from ini: JX3INIReader) -> JX3Antialiasing {
-        if ini.int("KG3DENGINE", "AAOPTION_DLSSOption", default: 0) > 0 {
-            return .dlss
-        }
-        if ini.bool("KG3DENGINE", "AAOPTION_EnableSMAA", default: false)
-            || ini.bool("KG3DENGINE", "bEnableRC_SMAA", default: false) {
-            return .smaa
-        }
-        if ini.bool("KG3DENGINE", "AAOPTION_EnableTXAA", default: false) {
-            return .taa
-        }
-        if ini.bool("KG3DENGINE", "EnableNIS", default: false) {
-            return .nis
-        }
-        if ini.bool("KG3DENGINE", "EnableFSR2", default: false)
-            || ini.bool("KG3DENGINE", "EnableFSR", default: false) {
-            return .fsr
-        }
-        return .disabled
-    }
-}
-
-nonisolated private struct JX3QualityConfigValues: Equatable, Sendable {
-    var frameRateLimit = 67
-    var playerModelLimit = 40
-    var npcModelLimit = 50
-    var clientSFXLimit = 1000
-    var screenSizeLimitedRate = 1.0
-
-    var enableFabric = true
-    var enableSkillOptimization = true
-    var enableLensLight = true
-    var enableCombi = false
-    var showOutline = true
-    var campUniform = false
-
-    var dungeonOptimization = true
-    var ownEffectLevel = 2
-    var otherEffectLevel = 3
-    var ownEffectIntensity = 1.0
-    var otherEffectIntensity = 1.0
-    var effectCullDistance: JX3EffectCullDistance = .custom
-    var sfxLodDist1 = 4_000
-    var sfxLodDist2 = 5_000
-    var sfxLodDist3 = 8_000
-
-    var foliageDensity = 50
-    var speedTreeDensity = 50
-    var shadowType = 0
-    var waterEffectLevel = 2
-    var shadowQuantity = 90
-    var pointLightLimitEnabled = true
-    var farDisplayDistance = 50_000
-    var engineGraphicsLevel = 3
-    var terrainBakeScaleRate = 2
-    var speedTreeLeafScale = 100.0
-
-    var ambientOcclusion = true
-    var screenDistortion = true
-    var fullScreenSoftLight = true
-    var hair = true
-    var firework = false
-    var depthOfField = true
-    var waterReflection = true
-    var volumetricCloud = true
-    var screenSpaceReflection = true
-    var fullScreenSharpen = false
-    var reflectionEnhancement = false
-
-    var antialiasing: JX3Antialiasing = .dlss
-    var upscaleMode = 0
-    var sharpness = 0.0
-
-    init(configURL: URL? = nil) {
-        let ini = JX3INIReader(url: configURL)
-
-        frameRateLimit = ini.int("ENGINEOPTION", "MaxFPS", default: frameRateLimit)
-        playerModelLimit = min(
-            1_000,
-            max(0, ini.int("ENGINEOPTION", "MDLRenderLimit", default: playerModelLimit))
-        )
-        npcModelLimit = min(
-            1_000,
-            max(0, ini.int("ENGINEOPTION", "MDLRenderNpcLimit", default: npcModelLimit))
-        )
-        let engineSFXLimit = ini.int("KG3DENGINE", "ClientSFXLimit", default: -1)
-        clientSFXLimit = engineSFXLimit >= 0
-            ? engineSFXLimit
-            : ini.int("ENGINEOPTION", "ClientSFXLimit", default: clientSFXLimit)
-        let configuredScreenSizeRate = ini.double(
-            "ENGINEOPTION",
-            "ScreenSizeLimitedRate",
-            default: screenSizeLimitedRate
-        )
-        screenSizeLimitedRate = min(
-            2,
-            max(0.5, (configuredScreenSizeRate * 100).rounded() / 100)
-        )
-
-        enableFabric = ini.bool("UIVideoSetting", "Fabric", default: enableFabric)
-        enableSkillOptimization = ini.bool(
-            "UIVideoSetting",
-            "OptimizeSkill",
-            default: enableSkillOptimization
-        )
-        enableLensLight = ini.bool(
-            "KG3DENGINE",
-            "bEnableRC_SunLensflare",
-            default: ini.bool("KG3DENGINE", "bEnableLensLightGlobal", default: enableLensLight)
-        )
-        enableCombi = ini.bool("UIVideoSetting", "Combi", default: enableCombi)
-        showOutline = ini.bool("UIVideoSetting", "ShowOutline", default: showOutline)
-        campUniform = ini.bool("UIVideoSetting", "CampUniform", default: campUniform)
-
-        dungeonOptimization = ini.bool(
-            "UIVideoSetting",
-            "DungeonSceneSetting",
-            default: dungeonOptimization
-        )
-        ownEffectLevel = ini.int("UIVideoSetting", "MyEffect", default: ownEffectLevel)
-        otherEffectLevel = ini.int("UIVideoSetting", "OtherEffect", default: otherEffectLevel)
-        ownEffectIntensity = ini.double(
-            "ENGINEOPTION",
-            "MyEffectAlpha",
-            default: ownEffectIntensity
-        )
-        otherEffectIntensity = ini.double(
-            "ENGINEOPTION",
-            "OtherEffectAlpha",
-            default: otherEffectIntensity
-        )
-        sfxLodDist1 = ini.int("ENGINEOPTION", "nSfxLodDist1", default: sfxLodDist1)
-        sfxLodDist2 = ini.int("ENGINEOPTION", "nSfxLodDist2", default: sfxLodDist2)
-        sfxLodDist3 = ini.int("ENGINEOPTION", "nSfxLodDist3", default: sfxLodDist3)
-        effectCullDistance = JX3EffectCullDistance.resolve(
-            first: sfxLodDist1,
-            second: sfxLodDist2,
-            third: sfxLodDist3
-        )
-
-        foliageDensity = ini.int("KG3DENGINE", "nFoliageDensity", default: foliageDensity)
-        speedTreeDensity = ini.int("KG3DENGINE", "nSpeedTreeDensity", default: speedTreeDensity)
-        shadowType = ini.int("KG3DENGINE", "nShadowType", default: shadowType)
-        waterEffectLevel = ini.int("KG3DENGINE", "nWaterEffectLevel", default: waterEffectLevel)
-        shadowQuantity = ini.int(
-            "KG3DENGINE",
-            "nRenderPointLightLimitCount",
-            default: shadowQuantity
-        )
-        pointLightLimitEnabled = ini.bool(
-            "KG3DENGINE",
-            "bRenderPointLightLimit",
-            default: pointLightLimitEnabled
-        )
-        farDisplayDistance = Int(ini.double(
-            "KG3DENGINE",
-            "fCameraDistanceHD",
-            default: Double(farDisplayDistance)
-        ).rounded())
-        engineGraphicsLevel = ini.int(
-            "ENGINEOPTION",
-            "nEngineGraphicsLevel",
-            default: engineGraphicsLevel
-        )
-        terrainBakeScaleRate = ini.int(
-            "KG3DENGINE",
-            "nTerrainBakeScaleRate",
-            default: terrainBakeScaleRate
-        )
-        speedTreeLeafScale = ini.double(
-            "KG3DENGINE",
-            "nSpeedTreeLeafScale",
-            default: speedTreeLeafScale
-        )
-
-        ambientOcclusion = ini.bool(
-            "KG3DENGINE",
-            "bEnableRC_AmbientOcclusion",
-            default: ambientOcclusion
-        )
-        screenDistortion = ini.bool(
-            "KG3DENGINE",
-            "bEnableRC_ShockWave",
-            default: screenDistortion
-        )
-        fullScreenSoftLight = ini.bool(
-            "KG3DENGINE",
-            "bEnableRC_Bloom",
-            default: fullScreenSoftLight
-        )
-        hair = ini.bool("KG3DENGINE", "EnableFur", default: hair)
-        firework = ini.bool("KG3DENGINE", "bDiamondFire", default: firework)
-        depthOfField = ini.bool(
-            "KG3DENGINE",
-            "bEnableRC_Depth",
-            default: depthOfField
-        )
-        waterReflection = ini.bool(
-            "KG3DENGINE",
-            "WaterReflection",
-            default: ini.bool("KG3DENGINE", "bEnableSSPR", default: waterReflection)
-        )
-        volumetricCloud = ini.bool(
-            "KG3DENGINE",
-            "bEnableRC_StingRayVolumetircCloud",
-            default: volumetricCloud
-        )
-        screenSpaceReflection = ini.bool(
-            "KG3DENGINE",
-            "bEnable_SSR",
-            default: ini.bool("KG3DENGINE", "bEnableRC_SSR", default: screenSpaceReflection)
-        )
-        fullScreenSharpen = ini.bool(
-            "KG3DENGINE",
-            "bEnableCASSharper",
-            default: fullScreenSharpen
-        )
-        reflectionEnhancement = ini.bool(
-            "KG3DENGINE",
-            "bOpenSunLightShadowSharpen",
-            default: reflectionEnhancement
-        )
-
-        antialiasing = JX3QualityConfigAntialiasing.resolve(from: ini)
-        upscaleMode = ini.int("KG3DENGINE", "FSR2Option", default: upscaleMode)
-        sharpness = JX3QualityConfigValues.sharpness(from: ini, antialiasing: antialiasing)
-    }
-
-    var updates: [OnlineGameInitialConfiguration.INIUpdate] {
-        let effectDistances = effectCullDistance.distances
-        let selectedDistances = effectDistances ?? (sfxLodDist1, sfxLodDist2, sfxLodDist3)
-
-        return [
-            update("ENGINEOPTION", "MaxFPS", intString(frameRateLimit)),
-            update("ENGINEOPTION", "MDLRenderLimit", intString(playerModelLimit)),
-            update("ENGINEOPTION", "MDLRenderNpcLimit", intString(npcModelLimit)),
-            update("ENGINEOPTION", "ClientSFXLimit", intString(clientSFXLimit)),
-            update("KG3DENGINE", "ClientSFXLimit", intString(clientSFXLimit)),
-            update("ENGINEOPTION", "ScreenSizeLimitedRate", decimalString(screenSizeLimitedRate)),
-
-            update("UIVideoSetting", "Fabric", boolString(enableFabric)),
-            update("UIVideoSetting", "OptimizeSkill", boolString(enableSkillOptimization)),
-            update("UIVideoSetting", "Combi", boolString(enableCombi)),
-            update("UIVideoSetting", "ShowOutline", boolString(showOutline)),
-            update("UIVideoSetting", "CampUniform", boolString(campUniform)),
-            update("KG3DENGINE", "bEnableRC_SunLensflare", boolString(enableLensLight)),
-            update("KG3DENGINE", "bEnableLensLightGlobal", boolString(enableLensLight)),
-
-            update("UIVideoSetting", "DungeonSceneSetting", boolString(dungeonOptimization)),
-            update("UIVideoSetting", "MyEffect", intString(ownEffectLevel)),
-            update("UIVideoSetting", "OtherEffect", intString(otherEffectLevel)),
-            update("ENGINEOPTION", "MyEffectAlpha", decimalString(ownEffectIntensity)),
-            update("ENGINEOPTION", "MyEffectLight", decimalString(ownEffectIntensity)),
-            update("ENGINEOPTION", "OtherEffectAlpha", decimalString(otherEffectIntensity)),
-            update("ENGINEOPTION", "OtherEffectLight", decimalString(otherEffectIntensity)),
-            update("ENGINEOPTION", "nSfxLodDist1", intString(selectedDistances.0)),
-            update("ENGINEOPTION", "nSfxLodDist2", intString(selectedDistances.1)),
-            update("ENGINEOPTION", "nSfxLodDist3", intString(selectedDistances.2)),
-
-            update("KG3DENGINE", "nFoliageDensity", intString(foliageDensity)),
-            update("KG3DENGINE", "nSpeedTreeDensity", intString(speedTreeDensity)),
-            update("KG3DENGINE", "nShadowType", intString(shadowType)),
-            update("KG3DENGINE", "nWaterEffectLevel", intString(waterEffectLevel)),
-            update("KG3DENGINE", "nRenderPointLightLimitCount", intString(shadowQuantity)),
-            update("KG3DENGINE", "bRenderPointLightLimit", boolString(pointLightLimitEnabled)),
-            update("KG3DENGINE", "fCameraDistanceHD", intString(farDisplayDistance)),
-            update("ENGINEOPTION", "nEngineGraphicsLevel", intString(engineGraphicsLevel)),
-            update("KG3DENGINE", "nTerrainBakeScaleRate", intString(terrainBakeScaleRate)),
-            update("KG3DENGINE", "nSpeedTreeLeafScale", decimalString(speedTreeLeafScale)),
-
-            update("KG3DENGINE", "bEnableRC_AmbientOcclusion", boolString(ambientOcclusion)),
-            update("KG3DENGINE", "bEnableRC_ShockWave", boolString(screenDistortion)),
-            update("KG3DENGINE", "bEnableRC_Bloom", boolString(fullScreenSoftLight)),
-            update("KG3DENGINE", "EnableFur", boolString(hair)),
-            update("KG3DENGINE", "bDiamondFire", boolString(firework)),
-            update("KG3DENGINE", "bEnableRC_Depth", boolString(depthOfField)),
-            update("KG3DENGINE", "WaterReflection", boolString(waterReflection)),
-            update("KG3DENGINE", "bEnableSSPR", boolString(waterReflection)),
-            update(
-                "KG3DENGINE",
-                "bEnableRC_StingRayVolumetircCloud",
-                boolString(volumetricCloud)
-            ),
-            update("KG3DENGINE", "bEnableCASSharper", boolString(fullScreenSharpen)),
-            update(
-                "KG3DENGINE",
-                "bOpenSunLightShadowSharpen",
-                boolString(reflectionEnhancement)
-            ),
-            update("KG3DENGINE", "bEnableRC_SSR", boolString(screenSpaceReflection)),
-            update("KG3DENGINE", "bEnable_SSR", boolString(screenSpaceReflection)),
-
-            update("KG3DENGINE", "AAOPTION_EnableTXAA", boolString(antialiasing == .taa)),
-            update("KG3DENGINE", "AAOPTION_EnableSMAA", boolString(antialiasing == .smaa)),
-            update("KG3DENGINE", "bEnableRC_SMAA", boolString(antialiasing == .smaa)),
-            update("KG3DENGINE", "AAOPTION_DLSSOption", intString(antialiasing == .dlss ? 1 : 0)),
-            update("KG3DENGINE", "EnableNIS", boolString(antialiasing == .nis)),
-            update("KG3DENGINE", "EnableFSR", boolString(antialiasing == .fsr)),
-            update("KG3DENGINE", "EnableFSR2", boolString(antialiasing == .fsr)),
-            update("KG3DENGINE", "FSR2Option", intString(upscaleMode)),
-            update("KG3DENGINE", "FSR3UpscaleOption", intString(upscaleMode)),
-            update("KG3DENGINE", "AAOPTION_DLSSParam", decimalString(sharpness)),
-            update("KG3DENGINE", "FSR2Sharpnees", decimalString(sharpness)),
-            update("KG3DENGINE", "FSR3Sharpness", decimalString(sharpness)),
-            update("KG3DENGINE", "NISSharpness", decimalString(sharpness))
-        ]
-    }
-
-    private static func sharpness(
-        from ini: JX3INIReader,
-        antialiasing: JX3Antialiasing
-    ) -> Double {
-        switch antialiasing {
-        case .nis:
-            return ini.double("KG3DENGINE", "NISSharpness", default: 0)
-        case .fsr:
-            return ini.double("KG3DENGINE", "FSR2Sharpnees", default: 0)
-        case .disabled, .smaa, .dlss, .taa:
-            return ini.double("KG3DENGINE", "AAOPTION_DLSSParam", default: 0)
-        }
-    }
-
-    private func update(
-        _ section: String,
-        _ key: String,
-        _ value: String
-    ) -> OnlineGameInitialConfiguration.INIUpdate {
-        OnlineGameInitialConfiguration.INIUpdate(
-            section: section,
-            key: key,
-            value: value
-        )
-    }
-
-    private func intString(_ value: Int) -> String {
-        String(value)
-    }
-
-    private func boolString(_ value: Bool) -> String {
-        value ? "1" : "0"
-    }
-
-    private func decimalString(_ value: Double) -> String {
-        String(format: "%.6f", locale: Locale(identifier: "en_US_POSIX"), value)
-    }
-}
 
 struct JX3QualitySettingsView: View {
     let bottleURL: URL?
     @State private var settings = JX3QualityConfigValues()
+    @State private var savedSettings = JX3QualityConfigValues()
     @State private var modelEdition: JX3ModelEdition = .flagship
     @State private var selectedSection: JX3QualitySection = .performance
     @State private var isApplying = false
@@ -721,6 +246,13 @@ struct JX3QualitySettingsView: View {
         }
         .onDisappear {
             autoApplyTask?.cancel()
+            // Closing within the debounce window must not discard the last edit.
+            if !isLoadingSettings, !isApplying, settings != savedSettings, let bottleURL {
+                let pendingSettings = settings
+                Task { @MainActor in
+                    await applyCurrentSettings(pendingSettings, in: bottleURL)
+                }
+            }
         }
     }
 
@@ -796,12 +328,9 @@ struct JX3QualitySettingsView: View {
                 ) {
                     qualityToggle("布料效果", isOn: $settings.enableFabric)
                     qualityToggle("技能性能", isOn: $settings.enableSkillOptimization)
-                    qualityToggle("镜头光", isOn: $settings.enableLensLight)
-                    qualityToggle(
-                        "虚拟几何",
-                        isOn: .constant(false),
-                        enabled: false
-                    )
+                    qualityToggle("雨雪开关", isOn: $settings.enableWeather)
+                    qualityToggle("日夜循环", isOn: $settings.enableDayNightCycle)
+                    qualityToggle("四季变换", isOn: $settings.enableSeasonalVariation)
                     qualityToggle("合并绘制", isOn: $settings.enableCombi)
                     qualityToggle("屏蔽勾边", isOn: $settings.showOutline)
                     qualityToggle("阵营同模", isOn: $settings.campUniform)
@@ -850,6 +379,10 @@ struct JX3QualitySettingsView: View {
                     pickerRow("其他玩家", selection: $settings.otherEffectLevel) {
                         effectLevelOptions
                     }
+                    effectSliderRow("自身透明度", value: $settings.ownEffectIntensity)
+                    effectSliderRow("其他玩家透明度", value: $settings.otherEffectIntensity)
+                    effectSliderRow("自身明暗度", value: $settings.ownEffectLight)
+                    effectSliderRow("其他玩家明暗度", value: $settings.otherEffectLight)
                     pickerRow("特效裁剪距离", selection: effectCullDistanceBinding) {
                         ForEach(JX3EffectCullDistance.allCases) { distance in
                             Text(distance.title).tag(distance)
@@ -865,20 +398,24 @@ struct JX3QualitySettingsView: View {
                     alignment: .leading,
                     spacing: 8
                 ) {
-                    pickerRow("植被密度", selection: foliageDensityBinding) {
+                    pickerRow("植被密度", selection: $settings.foliageDensity) {
                         Text("低").tag(10)
+                        Text("中").tag(25)
                         Text("高").tag(50)
-                        Text("极高").tag(100)
+                        Text("超高").tag(100)
+                        if ![10, 25, 50, 100].contains(settings.foliageDensity) {
+                            Text("自定义（\(settings.foliageDensity)）").tag(settings.foliageDensity)
+                        }
                     }
                     pickerRow("阴影质量", selection: $settings.shadowType) {
                         Text("无").tag(0)
                         Text("中").tag(1)
                         Text("高").tag(2)
-                        Text("极高").tag(3)
+                        Text("超高").tag(3)
                         Text("低").tag(7)
                     }
                     pickerRow("水面精度", selection: $settings.waterEffectLevel) {
-                        Text("极高").tag(0)
+                        Text("超高").tag(0)
                         Text("高").tag(1)
                         Text("中").tag(2)
                         Text("低").tag(3)
@@ -886,20 +423,24 @@ struct JX3QualitySettingsView: View {
                     pickerRow("阴影数量", selection: $settings.shadowQuantity) {
                         Text("低").tag(0)
                         Text("中").tag(40)
-                        Text("超高").tag(90)
-                        Text("极高").tag(100)
+                        Text("高").tag(90)
+                        Text("超高").tag(100)
                     }
                     pickerRow("远景显示", selection: farDisplayBinding) {
                         Text("低").tag(20_000)
                         Text("中").tag(50_000)
                         Text("高").tag(100_000)
-                        Text("极高").tag(800_000)
-                    }
-                    pickerRow("物件细节", selection: $settings.engineGraphicsLevel) {
-                        ForEach(1...8, id: \.self) { level in
-                            Text(engineGraphicsLevelTitle(level)).tag(level)
+                        Text("超高").tag(800_000)
+                        if ![20_000, 50_000, 100_000, 800_000].contains(settings.farDisplayDistance) {
+                            Text("自定义（\(settings.farDisplayDistance)）").tag(settings.farDisplayDistance)
                         }
                     }
+                    HStack {
+                        Text("物件细节")
+                        Spacer()
+                        Text("跟随预设").foregroundStyle(.secondary)
+                    }
+                    .help("尚未确认独立配置键；不会再将物件细节写入整体画质档位 nEngineGraphicsLevel。")
                     pickerRow("地形烘焙", selection: $settings.terrainBakeScaleRate) {
                         Text("高").tag(1)
                         Text("中").tag(2)
@@ -963,6 +504,16 @@ struct JX3QualitySettingsView: View {
                         enabled: postEffectPolicy.allows(.hair)
                     )
                     qualityToggle(
+                        "体积光",
+                        isOn: $settings.lightShafts,
+                        enabled: postEffectPolicy.allows(.lightShafts)
+                    )
+                    qualityToggle(
+                        "体积雾",
+                        isOn: $settings.volumetricFog,
+                        enabled: postEffectPolicy.allows(.volumetricFog)
+                    )
+                    qualityToggle(
                         "体积云",
                         isOn: $settings.volumetricCloud,
                         enabled: postEffectPolicy.allows(.volumetricCloud)
@@ -1005,11 +556,18 @@ struct JX3QualitySettingsView: View {
                         alignment: .leading,
                         spacing: 8
                     ) {
-                        pickerRow("档位", selection: $settings.upscaleMode) {
-                            Text("超性能").tag(0)
-                            Text("性能").tag(1)
-                            Text("均衡").tag(2)
-                            Text("质量").tag(3)
+                        // FSR2Option is not a DLSS mode. Do not offer an apparently
+                        // working DLSS picker until its client mapping is verified.
+                        if settings.antialiasing == .fsr {
+                            pickerRow("FSR 档位", selection: $settings.upscaleMode) {
+                                Text("超性能").tag(0)
+                                Text("性能").tag(1)
+                                Text("均衡").tag(2)
+                                Text("质量").tag(3)
+                                if !(0...3).contains(settings.upscaleMode) {
+                                    Text("当前值（\(settings.upscaleMode)）").tag(settings.upscaleMode)
+                                }
+                            }
                         }
                         sliderRow(
                             "锐度",
@@ -1206,26 +764,6 @@ struct JX3QualitySettingsView: View {
         )
     }
 
-    private var foliageDensityBinding: Binding<Int> {
-        Binding(
-            get: { settings.foliageDensity },
-            set: { newValue in
-                settings.foliageDensity = newValue
-                switch newValue {
-                case 10:
-                    settings.speedTreeDensity = 15
-                case 50:
-                    if settings.speedTreeDensity < 15 || settings.speedTreeDensity > 100 {
-                        settings.speedTreeDensity = 80
-                    }
-                case 100:
-                    settings.speedTreeDensity = 100
-                default:
-                    break
-                }
-            }
-        )
-    }
 
     private var farDisplayBinding: Binding<Int> {
         Binding(
@@ -1258,6 +796,16 @@ struct JX3QualitySettingsView: View {
             range: Double(range.lowerBound)...Double(range.upperBound),
             step: 1,
             formatter: integerString
+        )
+    }
+
+    private func effectSliderRow(_ title: String, value: Binding<Double>) -> some View {
+        sliderRow(
+            title,
+            value: value,
+            range: 0...1,
+            step: 0.01,
+            formatter: { String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), $0) }
         )
     }
 
@@ -1319,35 +867,6 @@ struct JX3QualitySettingsView: View {
         }
     }
 
-    private func effectLevelTitle(_ level: Int) -> String {
-        switch level {
-        case 0:
-            "高"
-        case 1:
-            "较高"
-        case 2:
-            "中"
-        case 3:
-            "低"
-        default:
-            "自定义（\(level)）"
-        }
-    }
-
-    private func engineGraphicsLevelTitle(_ level: Int) -> String {
-        switch level {
-        case 1, 2:
-            "低（\(level)）"
-        case 3, 4:
-            "中（\(level)）"
-        case 5, 6:
-            "高（\(level)）"
-        case 7, 8:
-            "极高（\(level)）"
-        default:
-            String(level)
-        }
-    }
 
     private func integerString(_ value: Double) -> String {
         String(Int(value.rounded()))
@@ -1368,6 +887,7 @@ struct JX3QualitySettingsView: View {
         }.value
 
         guard !Task.isCancelled else { return }
+        savedSettings = loadedSettings
         settings = loadedSettings
         modelEdition = configuredModelEdition(
             at: configURL,
@@ -1384,6 +904,7 @@ struct JX3QualitySettingsView: View {
         }
 
         autoApplyTask?.cancel()
+        guard settings != savedSettings else { return }
         let pendingSettings = settings
         autoApplyTask = Task { @MainActor in
             do {
@@ -1407,7 +928,8 @@ struct JX3QualitySettingsView: View {
 
         do {
             let configURL = JX3ConfigPresetImporter.configURL(in: bottleURL)
-            let updates = pendingSettings.updates
+            let updates = pendingSettings.updates(comparedTo: savedSettings)
+            guard !updates.isEmpty else { return }
             let confirmedSettings = try await Task.detached(priority: .utility) {
                 guard try OnlineGameInitialConfiguration.enforceINIValues(
                     at: configURL,
@@ -1426,8 +948,8 @@ struct JX3QualitySettingsView: View {
                 return JX3QualityConfigValues(configURL: configURL)
             }.value
             guard !Task.isCancelled else { return }
+            savedSettings = confirmedSettings
             settings = confirmedSettings
-            OnlineGameInitialConfiguration.startPolling(for: bottleURL)
             statusMessage = "已写入当前 Games 容器。"
         } catch is CancellationError {
             return
@@ -1437,8 +959,9 @@ struct JX3QualitySettingsView: View {
     }
 
     private func applyOfficialPreset(_ preset: JX3OfficialQualityPreset) {
-        guard let sourceURL = BundledOnlineGameResources.resourceURL(
-            named: preset.resourceName
+        guard let sourceURL = JX3ConfigPresetImporter.officialPresetURL(
+            named: preset.resourceName,
+            in: bottleURL
         ) else {
             errorMessage = "App 内未找到官方 \(preset.title) 画质预设。"
             statusMessage = nil
@@ -1471,6 +994,8 @@ struct JX3QualitySettingsView: View {
         displayName: String,
         modelEdition: JX3ModelEdition
     ) {
+        guard !isApplying else { return }
+        autoApplyTask?.cancel()
         guard let bottleURL else {
             errorMessage = "请先选择剑网3使用的 Bottle。"
             statusMessage = nil
@@ -1488,10 +1013,10 @@ struct JX3QualitySettingsView: View {
                 into: bottleURL
             )
             settings = JX3QualityConfigValues(configURL: result.configURL)
+            savedSettings = settings
             self.modelEdition = modelEdition
             storeModelEdition(modelEdition, for: bottleURL)
             isLoadingSettings = false
-            OnlineGameInitialConfiguration.startPolling(for: bottleURL)
 
             statusMessage = "已应用 \(displayName)。"
         } catch {
@@ -1504,8 +1029,9 @@ struct JX3QualitySettingsView: View {
         fallbackFor bottleURL: URL
     ) -> JX3ModelEdition {
         let reader = JX3INIReader(url: configURL)
-        if reader.bool("UIVideoSetting", "HDRepresent", default: false) {
-            return .flagship
+        if reader.string("UIVideoSetting", "HDRepresent") != nil {
+            return reader.bool("UIVideoSetting", "HDRepresent", default: false)
+                ? .flagship : .handDrawn
         }
 
         return UserDefaults.standard.string(forKey: modelEditionDefaultsKey(for: bottleURL))

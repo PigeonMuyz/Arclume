@@ -1,0 +1,19 @@
+[
+  {
+    "id": "nvidia-rtx-3060",
+    "name": "NVIDIA GeForce RTX 3060",
+    "fields": {
+      "performance.gpuscore": "17211",
+      "performance.gputype": "2",
+      "performance.gpuname": "geforce rtx 3060",
+      "performance.videotype": "7",
+      "performance.bdtype": "6",
+      "device.count": "3",
+      "device.description_0": "GameViewer Virtual Display Adapter",
+      "device.description_1": "Zako Display Adapter",
+      "device.description_2": "NVIDIA GeForce RTX 3060",
+      "device.description_3": "NVIDIA GeForce RTX 3060",
+      "device.description_4": "NVIDIA GeForce RTX 3060"
+    }
+  }
+]

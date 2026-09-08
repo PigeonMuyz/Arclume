@@ -162,7 +162,8 @@ struct GameHeader: View {
         .sheet(isPresented: $showGameOptions) {
             Modal(
                 L10n.format("Options for %@", displayName),
-                showModal: $showGameOptions
+                showModal: $showGameOptions,
+                subdued: true
             ) {
                 GameOptionsView(game: $game)
             }

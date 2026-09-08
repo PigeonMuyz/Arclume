@@ -22,6 +22,7 @@ struct DropDown: View {
         } else {
             HStack {
                 Text(label).lineLimit(1)
+                Spacer(minLength: 12)
                 Menu {
                     ForEach(options, id: \.id) { (id, label) in
                         Button {

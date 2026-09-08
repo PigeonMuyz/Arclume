@@ -382,6 +382,9 @@ struct JX3LauncherHomeView: View {
     @State private var presentedSettings: JX3LauncherSettingsSheet?
     @State private var selectedCarouselID: String?
     @State private var carouselSelectionStartedAt = Date()
+    @State private var showsCompactNotices = false
+    @AppStorage("jx3CompactHome", store: UserDefaults(suiteName: suiteName))
+    private var compactHomeEnabled = false
 
     private let carouselInterval: TimeInterval = 7
     private let carouselThumbnailWidth: CGFloat = 76
@@ -419,6 +422,78 @@ struct JX3LauncherHomeView: View {
     }
 
     var body: some View {
+        VStack(spacing: 0) {
+            if compactHomeEnabled {
+                compactHome
+            } else {
+                expandedHome
+            }
+        }
+        .task(id: compactHomeEnabled) {
+            loadJX3Options()
+            if feed == nil { feed = JX3LauncherFeedStore.cachedFeed() }
+            if !compactHomeEnabled { await refreshFeed() }
+        }
+        .onDisappear { persistJX3Options() }
+        .onChange(of: feed?.carousel.map(\.id)) { _, carouselIDs in
+            guard let selectedCarouselID else { return }
+            guard carouselIDs?.contains(selectedCarouselID) != true else { return }
+            self.selectedCarouselID = nil
+            carouselSelectionStartedAt = Date()
+        }
+    }
+
+    private var compactHome: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                if showsCloseButton { header }
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("剑网3旗舰版")
+                        .font(.title2.weight(.semibold))
+                    HStack(spacing: 8) {
+                        Text(OnlineGameRuntimeKind.selected() == .bundledWine ? "内置 Wine" : "CrossOver")
+                        Text("·")
+                        Text("Games 容器")
+                        Spacer()
+                        Label(runtimeActivity.state.title, systemImage: runtimeActivity.state.systemImage)
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    Text(OnlineGameMode.onlineGraphicsBackends.first(where: {
+                        $0.id == gameOptions.cxGraphicsBackend
+                    })?.label ?? gameOptions.cxGraphicsBackend)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                launchSettingsColumn
+                    .frame(height: 270)
+                DisclosureGroup("公告", isExpanded: $showsCompactNotices) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if isRefreshing { ProgressView().controlSize(.small) }
+                        if let feed {
+                            ForEach(feed.notices.prefix(5)) { notice in
+                                feedRow(title: notice.title, subtitle: notice.dateText, url: notice.detailURL)
+                            }
+                            if feed.notices.isEmpty { Text("暂无公告").foregroundStyle(.secondary) }
+                        } else if !isRefreshing {
+                            Text("暂时无法获取公告").foregroundStyle(.secondary)
+                        }
+                        Button("刷新公告") { Task { await refreshFeed() } }
+                            .disabled(isRefreshing)
+                    }
+                    .padding(.top, 10)
+                }
+                .task(id: showsCompactNotices) {
+                    if showsCompactNotices { await refreshFeed() }
+                }
+            }
+            .padding(28)
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    private var expandedHome: some View {
         GeometryReader { geometry in
             let horizontalPadding: CGFloat = 28
             let verticalPadding: CGFloat = 12
@@ -464,22 +539,6 @@ struct JX3LauncherHomeView: View {
                 .padding(.vertical, verticalPadding)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .task {
-            loadJX3Options()
-            if feed == nil {
-                feed = JX3LauncherFeedStore.cachedFeed()
-            }
-            await refreshFeed()
-        }
-        .onDisappear {
-            persistJX3Options()
-        }
-        .onChange(of: feed?.carousel.map(\.id)) { _, carouselIDs in
-            guard let selectedCarouselID else { return }
-            guard carouselIDs?.contains(selectedCarouselID) != true else { return }
-            self.selectedCarouselID = nil
-            carouselSelectionStartedAt = Date()
         }
     }
 
@@ -805,7 +864,8 @@ struct JX3LauncherHomeView: View {
                         }
                     }
                 ),
-                scrollable: settings.id != "quality"
+                scrollable: settings.id != "quality",
+                subdued: true
             ) {
                 switch settings {
                 case .quality:
@@ -924,7 +984,7 @@ struct JX3LauncherHomeView: View {
         .padding(18)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(
-            .arclumeAccent.mix(with: .black, by: 0.66).opacity(0.74),
+            compactHomeEnabled ? Color.white.opacity(0.045) : Color.arclumeAccent.mix(with: .black, by: 0.66).opacity(0.74),
             in: RoundedRectangle(cornerRadius: 20, style: .continuous)
         )
         .overlay {
@@ -950,7 +1010,8 @@ struct JX3LauncherHomeView: View {
     private var compactRuntimeSettings: some View {
         VStack(alignment: .leading, spacing: 9) {
             Toggle("Metal HUD", isOn: $gameOptions.mtlHudEnabled)
-            Toggle("DLSS3 Beta", isOn: $gameOptions.dlssFrameGenerationEnabled)
+            Toggle("DLSS FG 支持", isOn: $gameOptions.dlssFrameGenerationEnabled)
+                .help("仅声明 DLSS 与帧生成能力（DLSS=2），实际开关仍需在游戏画质设置中选择。")
         }
         .font(.subheadline)
         .controlSize(.small)

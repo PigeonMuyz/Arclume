@@ -33,6 +33,22 @@ enum JX3ConfigPresetError: LocalizedError {
 enum JX3ConfigPresetImporter {
     static let recommendedConfigResourceName = "jx3-normal-config.ini"
 
+    /// Prefer presets shipped with the installed client; bundled copies are an
+    /// offline fallback, not a reason to replace newer client-specific values.
+    static func officialPresetURL(named name: String, in bottleURL: URL?) -> URL? {
+        guard name == (name as NSString).lastPathComponent else { return nil }
+        if let bottleURL {
+            let localURL = configURL(in: bottleURL).deletingLastPathComponent()
+                .appendingPathComponent("config", isDirectory: true)
+                .appendingPathComponent(name)
+            if (try? localURL.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true,
+               FileManager.default.isReadableFile(atPath: localURL.path) {
+                return localURL
+            }
+        }
+        return BundledOnlineGameResources.resourceURL(named: name)
+    }
+
     static func configURL(in bottleURL: URL) -> URL {
         if let gameDirectoryURL = OnlineGameDiscovery.jx3GameDirectory(in: bottleURL) {
             return gameDirectoryURL.appendingPathComponent("config.ini")

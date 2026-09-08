@@ -24,6 +24,8 @@ final class Router: ObservableObject {
 }
 
 struct ContentView: View {
+    @AppStorage("jx3CompactHome", store: UserDefaults(suiteName: suiteName))
+    private var compactJX3Home = false
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var updateService: ArclumeUpdateService
     @StateObject private var router = Router()
@@ -60,14 +62,18 @@ struct ContentView: View {
         .environmentObject(nativeRuntimeStore)
         .background(
             ZStack {
-                LinearGradient(
-                    colors: [
-                        .arclumeAccent.mix(with: .black, by: 0.2),
-                        .arclumeAccent.mix(with: .black, by: 0.4)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ).ignoresSafeArea()
+                if compactJX3Home && modeStore.selectedMode?.isOnlineGameMode == true {
+                    Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+                } else {
+                    LinearGradient(
+                        colors: [
+                            .arclumeAccent.mix(with: .black, by: 0.2),
+                            .arclumeAccent.mix(with: .black, by: 0.4)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ).ignoresSafeArea()
+                }
             }
         )
         .onAppear {

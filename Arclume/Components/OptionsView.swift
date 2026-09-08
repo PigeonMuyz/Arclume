@@ -7,6 +7,10 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct OptionsView: View {
+    @State private var selectedSettingsPage = "通用"
+    @AppStorage("jx3CompactHome", store: UserDefaults(suiteName: suiteName))
+    private var compactJX3Home = false
+
     @State private var bottles: [URL] = []
     @State private var progress: Double = 0
     @State private var progressLabel = L10n.string("Processing...")
@@ -63,13 +67,10 @@ struct OptionsView: View {
         Modal(
             L10n.string("Options"),
             showModal: $libraryPageGlobals.showOptions,
-            scrollable: !isOnlineMode
+            scrollable: false,
+            subdued: true
         ) {
-            if isOnlineMode {
-                onlineSettingsContent
-            } else {
-                standardSettingsContent
-            }
+            settingsContent
         }
         .onAppear {
             if isOnlineMode {
@@ -128,44 +129,74 @@ struct OptionsView: View {
         }
     }
 
-    private var onlineSettingsContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            modeSelectionCard
-            updateCard
-            appearanceCard
-            aboutCard
+    private var settingsPages: [(String, String)] {
+        var pages = [("通用", "gearshape")]
+        if !isOnlineMode {
+            pages += [("运行时", "shippingbox"), ("游戏库", "square.stack")]
         }
-        .frame(width: 390)
-        .padding(.top, 16)
-        .padding(.bottom, 2)
+        return pages + [("更新", "arrow.triangle.2.circlepath"), ("关于", "info.circle")]
     }
 
-    private var standardSettingsContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            modeSelectionCard
-            updateCard
-            settingsCard { standardRuntimeSection }
-            if standardGameRuntime == .crossOver {
-                settingsCard { crossOverSection }
-                settingsCard { steamBottleSection }
-            } else {
-                settingsCard { bundledSteamPrefixSection }
+    private var settingsContent: some View {
+        HStack(alignment: .top, spacing: 0) {
+            VStack(spacing: 4) {
+                ForEach(settingsPages, id: \.0) { page in
+                    Button {
+                        selectedSettingsPage = page.0
+                    } label: {
+                        Label(page.0, systemImage: page.1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                selectedSettingsPage == page.0 ? Color.white.opacity(0.12) : .clear,
+                                in: RoundedRectangle(cornerRadius: 8)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selectedSettingsPage == page.0 ? [.isSelected] : [])
+                }
+                Spacer()
             }
-            settingsCard { GameLibrariesList(load: load) }
-            if !appGlobals.selectedBottle.isEmpty {
-                settingsCard { steamPathSection }
+            .frame(width: 125)
+            .padding(.trailing, 16)
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    switch selectedSettingsPage {
+                    case "运行时":
+                        settingsCard { standardRuntimeSection }
+                        if standardGameRuntime == .crossOver {
+                            settingsCard { crossOverSection }
+                            settingsCard { steamBottleSection }
+                            settingsCard { dependencySection }
+                        } else {
+                            settingsCard { bundledSteamPrefixSection }
+                        }
+                    case "游戏库":
+                        settingsCard { GameLibrariesList(load: load) }
+                        if !appGlobals.selectedBottle.isEmpty {
+                            settingsCard { steamPathSection }
+                        }
+                        settingsCard { nativeGamesSection }
+                        settingsCard { metadataSection }
+                    case "更新":
+                        updateCard
+                    case "关于":
+                        aboutCard
+                    default:
+                        modeSelectionCard
+                        appearanceCard
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 18)
+                .padding(.bottom, 16)
             }
-            settingsCard { nativeGamesSection }
-            settingsCard { metadataSection }
-            if standardGameRuntime == .crossOver {
-                settingsCard { dependencySection }
-            }
-            appearanceCard
-            aboutCard
         }
-        .frame(width: 390)
-        .padding(.top, 16)
-        .padding(.bottom, 2)
+        .frame(width: 680, height: 500)
+        .padding(.top, 18)
     }
 
     private var modeSelectionCard: some View {
@@ -205,6 +236,22 @@ struct OptionsView: View {
             Text("外观")
                 .font(.headline)
 
+            if isOnlineMode {
+                HStack(spacing: 12) {
+                    Label("剑三首页", systemImage: "rectangle.grid.1x2")
+                        .foregroundStyle(.white.opacity(0.82))
+                    Spacer(minLength: 8)
+                    Picker("剑三首页", selection: $compactJX3Home) {
+                        Text("简洁").tag(true)
+                        Text("完整").tag(false)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 180)
+                }
+                .help("简洁视图隐藏海报和资讯图片，仅保留启动与设置。")
+                Divider()
+            }
             HStack(spacing: 12) {
                 Label("语言", systemImage: "character.bubble")
                     .foregroundStyle(.white.opacity(0.82))
@@ -451,14 +498,12 @@ struct OptionsView: View {
                 guard let runtime = StandardGameRuntimeKind(rawValue: rawValue) else { return }
                 switchStandardRuntime(to: runtime)
             }
-            Text(
-                standardGameRuntime == .bundledWine
-                    ? "普通 Windows 游戏使用 Arclume Wine 与独立 Steam 容器，不需要 CrossOver。"
-                    : "普通 Windows 游戏使用你选择的 CrossOver Bottle。"
-            )
-            .font(.footnote)
-            .foregroundStyle(.secondary)
         }
+        .help(
+            standardGameRuntime == .bundledWine
+                ? "普通 Windows 游戏使用 Arclume Wine 与独立 Steam 容器，不需要 CrossOver。"
+                : "普通 Windows 游戏使用你选择的 CrossOver Bottle。"
+        )
     }
 
     private var bundledSteamPrefixSection: some View {
@@ -482,13 +527,11 @@ struct OptionsView: View {
             if BundledWineRuntime.isValidPrefix(at: BundledWineRuntime.standardSteamPrefixURL) {
                 HStack {
                     Button("安装 Steam…") { installSteamInBundledPrefix() }
+                        .help("选择 SteamSetup.exe 安装到此容器；安装完成后重新打开设置以扫描 Steam。")
                     Button("打开 Steam") { containerSteamStore.openSteam(using: .bundledWine) }
                         .disabled(!containerSteamStore.isReady)
                 }
                 .buttonStyle(.bordered)
-                Text("选择 SteamSetup.exe 后会在此容器内安装；安装完成后重新打开设置即可扫描到 Steam。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
             }
             if let bundledSteamProgress {
                 ProgressView(value: bundledSteamProgress) {
@@ -524,19 +567,12 @@ struct OptionsView: View {
                     .font(.footnote)
                     .foregroundStyle(.red)
             }
-            Text(
-                isOnlineMode
-                    ? "剑网3模式不会读取 Steam，只使用下方选择的 CrossOver Bottle 扫描 SeasunGame。"
-                    : "普通模式会使用下方选择的 CrossOver Bottle 扫描 Steam 游戏，也支持添加自定义游戏。"
-            )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
         }
     }
 
     private var steamBottleSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Steam Bottle")
+            Text("Steam 容器")
                 .font(.headline)
 
             if appGlobals.cxAppPath == nil {
@@ -644,22 +680,12 @@ struct OptionsView: View {
                 Task { await load() }
             }
 
-            Text(L10n.string(
+            .help(L10n.string(
                 "Native apps use their bundle identifier to look up App Store descriptions, developers, and genres in the selected language."
             ))
-            .font(.footnote)
-            .foregroundStyle(.secondary)
 
             if steamMetadataSource == SteamMetadataSource.localProxy.rawValue {
                 Text(L10n.string("Start local_steam_proxy.py from the project folder before reloading the library."))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else if steamMetadataSource == SteamMetadataSource.localOnly.rawValue {
-                Text(L10n.string("Games use local Steam manifests and do not request online metadata."))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else if steamMetadataSource == SteamMetadataSource.steamStore.rawValue {
-                Text(L10n.string("Game details are fetched directly from the public Steam Store API. No Steam password or session token is used."))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

@@ -73,6 +73,7 @@ enum OnlineGameInitialConfiguration {
         let section: String
         let key: String
         let value: String
+        var preservingValues: Set<String> = []
     }
 
     private actor PollingRegistry {
@@ -92,6 +93,7 @@ enum OnlineGameInitialConfiguration {
         let section: String
         let key: String
         let value: String
+        var preservingValues: Set<String> = []
     }
 
     private static let defaultPollInterval: Duration = .seconds(2)
@@ -120,11 +122,12 @@ enum OnlineGameInitialConfiguration {
         at url: URL,
         section: String,
         key: String,
-        value: String
+        value: String,
+        preservingValues: Set<String> = []
     ) throws -> Bool {
         try enforceINIValues(
             at: url,
-            updates: [INIUpdate(section: section, key: key, value: value)]
+            updates: [INIUpdate(section: section, key: key, value: value, preservingValues: preservingValues)]
         )
     }
 
@@ -142,9 +145,12 @@ enum OnlineGameInitialConfiguration {
         guard !updates.isEmpty else { return true }
 
         let data = try Data(contentsOf: url)
-        guard var contents = String(data: data, encoding: .utf8) else {
+        guard String(data: data, encoding: .utf8) != nil else {
             throw CocoaError(.fileReadCorruptFile)
         }
+        // Foundation's failable decoder consumes a UTF-8 BOM. Keep it when
+        // editing a client's existing INI instead of silently changing its format.
+        var contents = String(decoding: data, as: UTF8.self)
 
         let newline = contents.contains("\r\n") ? "\r\n" : "\n"
         contents = contents.replacingOccurrences(of: "\r\n", with: "\n")
@@ -156,7 +162,8 @@ enum OnlineGameInitialConfiguration {
                 in: &lines,
                 section: update.section,
                 key: update.key,
-                value: update.value
+                value: update.value,
+                preservingValues: update.preservingValues
             ) || didChange
         }
 
@@ -173,7 +180,8 @@ enum OnlineGameInitialConfiguration {
         in lines: inout [String],
         section: String,
         key: String,
-        value: String
+        value: String,
+        preservingValues: Set<String>
     ) -> Bool {
         var sectionStart: Int?
         var sectionEnd = lines.count
@@ -201,12 +209,17 @@ enum OnlineGameInitialConfiguration {
                 guard !trimmed.hasPrefix(";") && !trimmed.hasPrefix("#") else {
                     continue
                 }
-                let parts = trimmed.split(separator: "=", maxSplits: 1)
+                let parts = trimmed.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
                 guard let storedKey = parts.first,
                       storedKey.trimmingCharacters(in: .whitespaces)
                           .caseInsensitiveCompare(key) == .orderedSame
                 else {
                     continue
+                }
+
+                if parts.count == 2,
+                   preservingValues.contains(parts[1].trimmingCharacters(in: .whitespaces)) {
+                    return false
                 }
 
                 let replacement = "\(key)=\(value)"
@@ -227,9 +240,9 @@ enum OnlineGameInitialConfiguration {
         }
     }
 
-    /// Applies the user-facing DLSS3 frame-generation switch to the JX3
-    /// client configuration. The default value remains DLSS=1; enabling the
-    /// beta option changes only this key to DLSS=2.
+    /// Declares DLSS (1) or DLSS + frame-generation (2) capability to the client.
+    /// This does not enable upscaling or frame generation in the game's quality settings.
+    /// Keep the API/preferences name for compatibility with existing saved options.
     @discardableResult
     static func applyDLSSFrameGeneration(
         enabled: Bool,
@@ -268,7 +281,8 @@ enum OnlineGameInitialConfiguration {
                     .appendingPathComponent("machine_config.ini"),
                 section: "Performance",
                 key: "DLSS",
-                value: "1"
+                value: "1",
+                preservingValues: ["1", "2"]
             )
         ]
     }
@@ -284,9 +298,13 @@ enum OnlineGameInitialConfiguration {
                         at: target.url,
                         section: target.section,
                         key: target.key,
-                        value: target.value
+                        value: target.value,
+                        preservingValues: target.preservingValues
                     ) {
-                        console.log("剑网3初始化配置已确认：\(target.key)=\(target.value)")
+                        let detail = target.preservingValues.isEmpty
+                            ? "\(target.key)=\(target.value)"
+                            : "\(target.key)（保留已有能力声明）"
+                        console.log("剑网3初始化配置已确认：\(detail)")
                     } else {
                         nextPending.append(target)
                     }
@@ -455,16 +473,20 @@ enum OnlineGameLauncher {
         guard let executableURL = installation.preferredLaunchURL else {
             throw CocoaError(.fileNoSuchFile)
         }
+        let machineConfig = JX3ConfigPresetImporter.configURL(in: bottleURL).deletingLastPathComponent()
+            .appendingPathComponent("config", isDirectory: true)
+            .appendingPathComponent("machine_config.ini")
+        try await JX3GPUProfileStore.shared.reapply(at: machineConfig)
         do {
             if try OnlineGameInitialConfiguration.applyDLSSFrameGeneration(
                 enabled: options.dlssFrameGenerationEnabled,
                 in: bottleURL
             ) {
                 let value = options.dlssFrameGenerationEnabled ? "2" : "1"
-                console.log("剑网3 DLSS 帧生成配置已设置为 DLSS=\(value)")
+                console.log("剑网3 DLSS 能力声明已设置为 DLSS=\(value)；实际画质开关由客户端控制")
             }
         } catch {
-            console.warn("剑网3 DLSS 帧生成配置暂时无法写入：\(error.localizedDescription)")
+            console.warn("剑网3 DLSS 能力声明暂时无法写入：\(error.localizedDescription)")
         }
         do {
             if try BundledOnlineGameResources.installNVNGX(into: bottleURL) {

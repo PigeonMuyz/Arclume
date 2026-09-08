@@ -13,6 +13,7 @@ struct Modal<Content: View>: View {
     var collapse: Bool? = false
     var scrollable: Bool? = true
     var allowsClose = true
+    var subdued = false
     let content: Content
     
     init(
@@ -21,6 +22,7 @@ struct Modal<Content: View>: View {
         collapse: Bool? = nil,
         scrollable: Bool = true,
         allowsClose: Bool = true,
+        subdued: Bool = false,
         @ViewBuilder content: () -> Content
     ) {
         self._showModal = showModal
@@ -29,6 +31,7 @@ struct Modal<Content: View>: View {
         self.content = content()
         self.scrollable = scrollable
         self.allowsClose = allowsClose
+        self.subdued = subdued
     }
     
     var body: some View {
@@ -65,14 +68,18 @@ struct Modal<Content: View>: View {
         }
         .background(
             ZStack {
-                LinearGradient(
-                    colors: [
-                        .arclumeAccent.mix(with: .black, by: 0.2),
-                        .arclumeAccent.mix(with: .black, by: 0.4)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                ).ignoresSafeArea()
+                if subdued {
+                    Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
+                } else {
+                    LinearGradient(
+                        colors: [
+                            .arclumeAccent.mix(with: .black, by: 0.2),
+                            .arclumeAccent.mix(with: .black, by: 0.4)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    ).ignoresSafeArea()
+                }
             }
         )
     }

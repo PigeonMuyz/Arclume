@@ -91,8 +91,8 @@ struct GameOptionsView: View {
                         VStack(alignment: .trailing, spacing: 12) {
                             Toggle("Metal HUD", isOn: $gameOptions.mtlHudEnabled)
                             Toggle("MSync", isOn: $gameOptions.wineMSync)
-                            Toggle("DLSS3 帧生成 Beta", isOn: $gameOptions.dlssFrameGenerationEnabled)
-                                .help("启动前将剑网3的 DLSS 配置写为 2；关闭时恢复为 1。")
+                            Toggle("DLSS FG 支持", isOn: $gameOptions.dlssFrameGenerationEnabled)
+                                .help("向客户端声明 DLSS 与帧生成能力（DLSS=2）；关闭时仅声明 DLSS 能力（DLSS=1）。实际开关仍需在游戏画质设置中选择。")
                             Toggle(
                                 "检测到游戏本体后关闭启动器",
                                 isOn: $gameOptions.closeLauncherWhenGameStarts
@@ -133,7 +133,7 @@ struct GameOptionsView: View {
                 }
                 .buttonStyle(.bordered)
 
-                Text("导入你在游戏外调整好的 config.ini。导入会直接替换当前配置，不会保存备份；DLSS 默认写入 1，启动时按上面的 Beta 开关切换为 2。")
+                Text("导入会替换当前 config.ini，不保留备份；不会修改 DLSS 能力声明。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
 
@@ -152,55 +152,50 @@ struct GameOptionsView: View {
     }
 
     private var standardOptionsForm: some View {
-        Form {
+        Group {
             VStack(alignment: .leading, spacing: 20) {
-                Section(L10n.string("Generic options")) {
-                    HStack(alignment: .top, spacing: 20) {
-                        VStack(alignment: .trailing) {
-                            if !game!.isNative {
-                                DropDown(
-                                    options: cxGraphicsBackend,
-                                    label: L10n.string("Graphics Backend"),
-                                    value: $gameOptions.cxGraphicsBackend
-                                )
-                            }
-                            Divider()
-                            TextField(L10n.string("Game arguments"), text: $gameOptions.gameArguments)
-                            TextField(L10n.string("Env variables"), text: $gameOptions.envVariables)
-                            if !game!.isNative {
-                                Divider()
-                                Text(L10n.string("32Bits options"))
-                                Toggle(L10n.string("Use DX9"), isOn: $gameOptions.dx9PatchEnabled)
-                                    .onChange(of: gameOptions.dx9PatchEnabled) { _, newValue in
-                                        if newValue {
-                                            gameOptions.cxGraphicsBackend = "wine"
-                                        }
-                                    }
-                            }
+                GroupBox("运行与图形") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if !game!.isNative {
+                            DropDown(options: cxGraphicsBackend,
+                                     label: L10n.string("Graphics Backend"),
+                                     value: $gameOptions.cxGraphicsBackend)
+                            Toggle("MSync", isOn: $gameOptions.wineMSync)
                         }
+                        Toggle("Metal HUD", isOn: $gameOptions.mtlHudEnabled)
+                    }
+                    .padding(8)
+                }
 
-                        Spacer()
-
-                        VStack(alignment: .trailing) {
-                            Toggle(L10n.string("Metal HUD"), isOn: $gameOptions.mtlHudEnabled)
-                            Toggle(L10n.string("Advertise AVX"), isOn: $gameOptions.advertiseAVX)
-                            if !game!.isNative {
-                                Toggle(L10n.string("MSync"), isOn: $gameOptions.wineMSync)
-                                Toggle(L10n.string("Enable SDL"), isOn: $gameOptions.enableSDL)
-                                Toggle(L10n.string("Disable Hidraw"), isOn: $gameOptions.disableHidraw)
-                                Divider()
-                                Text(L10n.string("Vulkan options"))
-                                Toggle(L10n.string("Enable UE4 Hack"), isOn: $gameOptions.ue4Hack)
-                                Toggle(L10n.string("MTL arg. buffers"), isOn: $gameOptions.mvkArgBuff)
-                                DropDown(
-                                    options: cxVulkanBackend,
-                                    label: L10n.string("Vulkan library"),
-                                    value: $gameOptions.vulkanLib
-                                )
-                                .pickerStyle(.menu)
-                            }
+                DisclosureGroup("兼容性与输入设备") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle(L10n.string("Advertise AVX"), isOn: $gameOptions.advertiseAVX)
+                        if !game!.isNative {
+                            Toggle(L10n.string("Use DX9"), isOn: $gameOptions.dx9PatchEnabled)
+                                .onChange(of: gameOptions.dx9PatchEnabled) { _, enabled in
+                                    if enabled { gameOptions.cxGraphicsBackend = "wine" }
+                                }
+                            Toggle(L10n.string("Enable SDL"), isOn: $gameOptions.enableSDL)
+                            Toggle(L10n.string("Disable Hidraw"), isOn: $gameOptions.disableHidraw)
+                            Divider()
+                            Text(L10n.string("Vulkan options")).font(.subheadline.weight(.medium))
+                            Toggle(L10n.string("Enable UE4 Hack"), isOn: $gameOptions.ue4Hack)
+                            Toggle(L10n.string("MTL arg. buffers"), isOn: $gameOptions.mvkArgBuff)
+                            DropDown(options: cxVulkanBackend,
+                                     label: L10n.string("Vulkan library"),
+                                     value: $gameOptions.vulkanLib)
                         }
                     }
+                    .padding(.top, 12)
+                }
+
+                DisclosureGroup("自定义启动参数") {
+                    VStack(spacing: 12) {
+                        TextField(L10n.string("Game arguments"), text: $gameOptions.gameArguments)
+                        TextField(L10n.string("Env variables"), text: $gameOptions.envVariables)
+                    }
+                    .textFieldStyle(.roundedBorder)
+                    .padding(.top, 12)
                 }
 
                 if gameOptions.cxGraphicsBackend == "dxmt" {
@@ -263,8 +258,8 @@ struct GameOptionsView: View {
                 optionsActions(includeAutoConfigure: true)
             }
         }
-        .controlSize(.small)
-        .formStyle(.columns)
+        .frame(width: 480)
+        .controlSize(.regular)
         .toggleStyle(.switch)
     }
 
@@ -374,19 +369,6 @@ struct GameOptionsView: View {
                 "已导入 \(sourceURL.lastPathComponent)",
                 "SkipVideoCardScoreUpdate=1"
             ]
-            do {
-                if try OnlineGameInitialConfiguration.applyDLSSFrameGeneration(
-                    enabled: false,
-                    in: selectedBottleURL
-                ) {
-                    details.append("DLSS=1")
-                } else {
-                    details.append("machine_config.ini 尚未生成，DLSS=1 将在初始化时自动补齐")
-                }
-            } catch {
-                details.append("DLSS 将在初始化时自动补齐")
-                console.warn("导入剑网3画质预设后暂时无法写入 DLSS=1：\(error.localizedDescription)")
-            }
 
             do {
                 if try BundledOnlineGameResources.installNVNGX(into: selectedBottleURL) {
@@ -397,7 +379,6 @@ struct GameOptionsView: View {
                 console.warn("导入剑网3画质预设后暂时无法替换 NVNGX：\(error.localizedDescription)")
             }
 
-            OnlineGameInitialConfiguration.startPolling(for: selectedBottleURL)
             jx3PresetMessage = details.joined(separator: "；")
         } catch {
             jx3PresetErrorMessage = error.localizedDescription
