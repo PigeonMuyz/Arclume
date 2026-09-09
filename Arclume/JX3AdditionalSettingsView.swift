@@ -14,7 +14,7 @@ struct JX3AdditionalSettingsView: View {
     @State private var isApplyingGPUProfile = false
 
     private var machineConfigURL: URL? {
-        guard let bottle = OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle) else { return nil }
+        guard let bottle = OnlineGameMode.jx3BottleURL(appGlobals: appGlobals) else { return nil }
         return JX3ConfigPresetImporter.configURL(in: bottle).deletingLastPathComponent()
             .appendingPathComponent("config", isDirectory: true)
             .appendingPathComponent("machine_config.ini")
@@ -24,12 +24,7 @@ struct JX3AdditionalSettingsView: View {
         VStack(alignment: .leading, spacing: 20) {
             GroupBox("运行时与图形") {
                 VStack(alignment: .leading, spacing: 12) {
-                    DropDown(
-                        options: OnlineGameRuntimeKind.launcherRuntimeOptions,
-                        label: "运行时",
-                        value: runtimeSelection
-                    )
-                    .disabled(isRuntimeActive || isApplyingGPUProfile)
+                    LabeledContent("运行时", value: "Arclume Wine")
                     DropDown(
                         options: OnlineGameMode.onlineGraphicsBackends,
                         label: "图形后端",
@@ -86,7 +81,7 @@ struct JX3AdditionalSettingsView: View {
                 return OnlineGameRuntimeKind.selected().rawValue
             },
             set: { rawValue in
-                guard !isRuntimeActive, !isApplyingGPUProfile,
+                guard OnlineGameMode.isEnabled, !isRuntimeActive, !isApplyingGPUProfile,
                       let runtime = OnlineGameRuntimeKind(rawValue: rawValue),
                       let bottleURL = OnlineGameRuntimeKind.readyBottleURL(
                           for: runtime,

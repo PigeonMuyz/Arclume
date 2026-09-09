@@ -1,6 +1,39 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "DLSS Frame Generation (Beta)" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DLSS 帧生成（Beta）"
+          }
+        }
+      }
+    },
+    "Show frame rate and GPU performance metrics." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示帧率与 GPU 性能指标。"
+          }
+        }
+      }
+    },
+    "Expose DLSS frame generation support; enable it separately in the game's graphics settings." : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "声明 DLSS 帧生成支持；实际开关仍需在游戏画质设置中开启。"
+          }
+        }
+      }
+    },
     "" : {
 
     },
@@ -1052,7 +1085,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Metal HUD"
+            "value" : "性能面板"
           }
         }
       }

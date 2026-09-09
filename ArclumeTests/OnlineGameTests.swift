@@ -893,11 +893,9 @@ struct OnlineGameTests {
 
         let store = GameCompatibilityStore(defaults: fixture.defaults)
         store.setCrossOverStatus(.supported, for: game)
-        store.setGPTK4BetaEnabled(true, for: game)
 
         let reloaded = GameCompatibilityStore(defaults: fixture.defaults)
         #expect(reloaded.profile(for: game).crossOverStatus == .supported)
-        #expect(reloaded.profile(for: game).gptk4BetaEnabled)
         #expect(reloaded.isPlayableOnMac(game))
     }
 

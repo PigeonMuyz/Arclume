@@ -1,17 +1,17 @@
-//
-//  ArclumeTests.swift
-//  ArclumeTests
-//
-//  Created by Italo Mandara on 29/01/2026.
-//
-
+import Foundation
 import Testing
 @testable import Arclume
 
 struct ArclumeTests {
-
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+    @Test func testHostUsesIsolatedPreferences() {
+        #expect(ArclumeTestEnvironment.isTesting)
+        #expect(suiteName.hasPrefix("io.github.pigeonmuyz.arclume.tests."))
+        #expect(suiteName != "group.io.github.pigeonmuyz.arclume")
     }
 
+    @Test func shippedAdaptationsHaveUniqueIdentifiers() {
+        let rules = GameAdaptationRules.all
+        #expect(!rules.isEmpty)
+        #expect(Set(rules.map(\.id)).count == rules.count)
+    }
 }

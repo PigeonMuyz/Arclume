@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Arclume game adaptations v1",
+  "type": "object",
+  "required": ["schemaVersion", "rules"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "rules": {"type": "array", "items": {"$ref": "#/$defs/rule"}},
+    "processNames": {
+      "type": "array", "items": {
+        "type": "object", "additionalProperties": false, "required": ["executable", "name"],
+        "anyOf": [{"required": ["ruleID"]}, {"required": ["ancestorDirectoryName"]}],
+        "properties": {
+          "executable": {"type": "string", "pattern": "^[^/\\\\:]+\\.[eE][xX][eE]$"},
+          "name": {"type": "string", "minLength": 1, "maxLength": 128},
+          "ruleID": {"type": "string", "minLength": 1},
+          "ancestorDirectoryName": {"$ref": "#/$defs/path"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\\\:\\u0000-\\u001f]+$"},
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "kind", "installDirectory", "executable", "alternateExecutables", "requiredFiles", "defaultArguments"],
+      "allOf": [{
+        "if": {"required": ["portable"]},
+        "then": {
+          "properties": {
+            "kind": {"const": "application"},
+            "installDirectory": {"pattern": "^PortableApps/[^/]+$"},
+            "requiredFiles": {"minItems": 1}
+          },
+          "not": {"anyOf": [{"required": ["launcherID"]}, {"required": ["installer"]}]}
+        }
+      }, {
+        "if": {"required": ["greenPreparation"]},
+        "then": {"required": ["portable", "userDataDirectory"]}
+      }],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "name": {"type": "string", "minLength": 1},
+        "kind": {"enum": ["launcher", "game", "application"]},
+        "installDirectory": {"$ref": "#/$defs/path"},
+        "executable": {"$ref": "#/$defs/path"},
+        "alternateExecutables": {"type": "array", "items": {"$ref": "#/$defs/path"}},
+        "requiredFiles": {"type": "array", "items": {"$ref": "#/$defs/path"}},
+        "ancestorDirectoryName": {"type": "string", "minLength": 1},
+        "defaultArguments": {"type": "array", "items": {"type": "array", "minItems": 1, "items": {"type": "string"}}},
+        "launcherID": {"type": "string", "minLength": 1},
+        "gameDBID": {"type": "integer", "minimum": 1},
+        "captureErrors": {"type": "boolean"},
+        "greenPreparation": {
+          "type": "object", "additionalProperties": false, "required": ["blockedDirectories"],
+          "properties": {
+            "blockedDirectories": {
+              "type": "array", "minItems": 1, "maxItems": 64, "uniqueItems": true,
+              "items": {"allOf": [{"$ref": "#/$defs/path"}, {"pattern": "^[^/]+/.+$"}]}
+            }
+          }
+        },
+        "userDataDirectory": {"$ref": "#/$defs/path"},
+        "registryKey": {"type": "string", "minLength": 1},
+        "launcherRemovalEntries": {"type": "array", "items": {"$ref": "#/$defs/path"}},
+        "launcherVersionDirectories": {"type": "boolean"},
+        "portable": {
+          "type": "object", "additionalProperties": false, "required": ["scriptPolicy", "preservePaths"],
+          "properties": {
+            "scriptPolicy": {"const": "skip"},
+            "preservePaths": {"type": "array", "uniqueItems": true, "items": {"allOf": [{"$ref": "#/$defs/path"}, {"pattern": "^[^/]+$"}]}}
+          }
+        },
+        "installer": {
+          "type": "object", "additionalProperties": false, "required": ["filenamePrefix", "engine", "signature"],
+          "properties": {"filenamePrefix": {"type": "string", "minLength": 1}, "engine": {"const": "nsis"}, "signature": {"const": "NullsoftInst"}}
+        },
+        "dataEntries": {
+          "type": "array", "items": {
+            "type": "object", "additionalProperties": false, "required": ["name", "category"],
+            "properties": {"name": {"$ref": "#/$defs/path"}, "category": {"enum": ["logs", "local", "login"]}, "hexSuffixLength": {"const": 32}}
+          }
+        }
+      }
+    }
+  }
+}

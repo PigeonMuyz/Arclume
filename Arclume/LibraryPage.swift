@@ -11,6 +11,7 @@ import Kingfisher
 
 struct LibraryPage: View {
     @StateObject var libraryPageGlobals = LibraryPageGlobals()
+    @StateObject private var windowsInstallerStore = WindowsInstallerStore()
     @EnvironmentObject var appGlobals: AppGlobals
     @EnvironmentObject var containerSteamStore: ContainerSteamStore
     @State private var isLoading = false
@@ -163,6 +164,14 @@ struct LibraryPage: View {
             .sheet(isPresented: $libraryPageGlobals.showTools) {
                 ToolsView(load: load)
             }
+            .alert("未能结束 Wine", isPresented: Binding(
+                get: { libraryPageGlobals.wineStopErrorMessage != nil },
+                set: { if !$0 { libraryPageGlobals.wineStopErrorMessage = nil } }
+            )) {
+                Button("好", role: .cancel) { libraryPageGlobals.wineStopErrorMessage = nil }
+            } message: {
+                Text(libraryPageGlobals.wineStopErrorMessage ?? "")
+            }
             .sheet(isPresented: $libraryPageGlobals.showDetailView) {
                 Modal(showModal: $libraryPageGlobals.showDetailView, collapse: true, content:  {
                     GameDetailView(game: $libraryPageGlobals.selectedGame)
@@ -180,7 +189,10 @@ struct LibraryPage: View {
                     )
                 }
             }
-            .overlay(alignment: .bottom) {
+            .sheet(isPresented: $libraryPageGlobals.showWindowsInstaller) {
+                WindowsInstallerView()
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 if OnlineGameMode.isEnabled {
                     if isLoading {
                         HStack {
@@ -195,7 +207,14 @@ struct LibraryPage: View {
                     HStack(alignment: .bottom) {
                         ArclumeToolbar()
                         Spacer()
-                        if (isLoading) {
+                        if containerSteamStore.steamSetupBusy {
+                            ProgressView(value: containerSteamStore.steamSetupProgress) {
+                                Text(containerSteamStore.steamSetupMessage ?? "正在安装 Steam…")
+                                    .font(.caption)
+                                    .lineLimit(2)
+                            }
+                            .frame(width: 230)
+                        } else if isLoading {
                             LoadingProgress(progress: $progress)
                         }
                     }
@@ -222,13 +241,17 @@ struct LibraryPage: View {
             }
             .onAppear() {
                 isLoading = true // fixes missing library issue
-                try? FileManager.default.createDirectory(at: ARCLUME_SUPPORT_FOLDER_URL.appendingPathComponent(DEFAULT_CXP_BOTTLES_FOLDER), withIntermediateDirectories: true)
                 if loadDebugFixtureIfRequested() {
                     isLoading = false
                     return
                 }
+                try? FileManager.default.createDirectory(at: ARCLUME_SUPPORT_FOLDER_URL.appendingPathComponent(DEFAULT_CXP_BOTTLES_FOLDER), withIntermediateDirectories: true)
                 if OnlineGameMode.isEnabled,
                    !didOfferOnlineSetupGuide {
+                    // A mode switch leaves the shared selection pointing at
+                    // Steam until the JX3 selection has been restored.
+                    OnlineGameRuntimeKind.migrateLegacyCrossOverConfigurationIfNeeded(appGlobals: appGlobals)
+                    OnlineGameRuntimeKind.restoreActiveBottleIfAvailable(appGlobals: appGlobals)
                     didOfferOnlineSetupGuide = true
                     DispatchQueue.main.async {
                         if OnlineGameSetupStatus.requiresBundledWineRuntimeUpdate(
@@ -273,6 +296,7 @@ struct LibraryPage: View {
                 )
             }
             .environmentObject(libraryPageGlobals)
+            .environmentObject(windowsInstallerStore)
         }
     }
 
@@ -303,6 +327,8 @@ struct LibraryPage: View {
         fixtureGame.isNative = false
         fixtureGame.downloadProgress = 0
         fixtureGame.isFromNativeSteamLibrary = nil
+        fixtureGame.headerImage = ""
+        fixtureGame.screenshots = []
         libraryPageGlobals.gamesMeta = [
             GamesMeta(
                 appid: String(Game.mock.steamAppID),
@@ -342,6 +368,12 @@ struct LibraryPage: View {
             }
         }
         progress = 0
+        containerSteamStore.refreshClientDetection(
+            bottleURL: OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle),
+            legacyOverride: readUsrDefOptionString(key: "windowsSteamFolder").map(fileURL(from:))
+        )
+        appGlobals.windowsSteamFolder = containerSteamStore.installation?.steamRootURL
+        appGlobals.refreshSteamIdentity(containerInstallation: containerSteamStore.installation)
         let folders = getSteamFolderPaths()
         var loadedGamesMeta: [GamesMeta] = []
         var ownershipByAppID: [Int: Set<SteamClientKind>] = [:]
@@ -467,7 +499,7 @@ struct LibraryPage: View {
             }
         loadedGamesMeta.append(contentsOf: ownedMeta)
 
-        let loadedGames = api.cachedGamesInfo(
+        var loadedGames = api.cachedGamesInfo(
             meta: loadedGamesMeta,
             setProgress: { value in
                 if generation == loadGeneration {
@@ -475,8 +507,39 @@ struct LibraryPage: View {
                 }
             }
         )
+        // Legacy Steam libraries stay visible but may not be silently launched
+        // inside the newly selected prefix.
+        for index in loadedGames.indices where !loadedGames[index].isNative {
+            if let meta = loadedGamesMeta.first(where: { $0.appid == String(loadedGames[index].steamAppID) && !$0.isNative }),
+               ![BundledWineRuntime.prefixURL, BundledWineRuntime.standardSteamPrefixURL].contains(where: {
+                   meta.libraryFolder.standardizedFileURL.path.hasPrefix($0.standardizedFileURL.path + "/")
+               }) {
+                loadedGames[index].installedRuntimeKind = StandardGameRuntimeKind.crossOver.rawValue
+            }
+        }
+        if let bottleURL = OnlineGameMode.jx3BottleURL(appGlobals: appGlobals) {
+            let installation = await Task.detached(priority: .utility) {
+                OnlineGameDiscovery.jx3Installation(in: bottleURL)
+            }.value
+            loadedGames.append(contentsOf: OnlineGameDiscovery.games(from: installation))
+        }
         guard generation == loadGeneration, !Task.isCancelled else { return }
         libraryPageGlobals.folders = folders
+        if StandardGameRuntimeKind.selected() == .bundledWine {
+            let bottle = OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle)
+                ?? BundledWineRuntime.standardSteamPrefixURL
+            if (BundledWineRuntime.ownsStandardSteamPrefix(bottle) || BundledWineRuntime.ownsPrefix(bottle)),
+               BundledWineRuntime.isValidPrefix(at: bottle) {
+                let candidates = await Task.detached(priority: .utility) {
+                    WindowsGameLaunchRules.discover(in: bottle)
+                }.value
+                guard generation == loadGeneration, !Task.isCancelled else { return }
+                for candidate in candidates {
+                    libraryPageGlobals.addInstalledProgram(candidate, bottle: bottle,
+                        runtimeKind: StandardGameRuntimeKind.bundledWine.rawValue, crossOverPath: nil)
+                }
+            }
+        }
         libraryPageGlobals.gamesMeta = loadedGamesMeta
         libraryPageGlobals.games = loadedGames
         libraryPageGlobals.ownershipByAppID = ownershipByAppID
@@ -484,6 +547,8 @@ struct LibraryPage: View {
         progress = 100
 
         metadataRefreshTask = Task(priority: .utility) {
+            await libraryPageGlobals.refreshGameDBMetadata()
+            guard generation == loadGeneration, !Task.isCancelled else { return }
             do {
                 try await api.refreshGamesInfoIncrementally(
                     meta: loadedGamesMeta,
@@ -510,6 +575,7 @@ struct LibraryPage: View {
             await libraryPageGlobals.refreshNativeAppStoreMetadata()
             guard generation == loadGeneration, !Task.isCancelled else { return }
             await libraryPageGlobals.refreshNativeSteamMetadata()
+            guard generation == loadGeneration, !Task.isCancelled else { return }
         }
     }
 
@@ -554,7 +620,7 @@ struct LibraryPage: View {
 
     @MainActor
     private func launchJX3Game(_ game: Game) {
-        guard !libraryPageGlobals.isLaunchingGame else { return }
+        guard !libraryPageGlobals.isLaunchingGame, !libraryPageGlobals.isStoppingWine else { return }
 
         libraryPageGlobals.selectedGame = game
         libraryPageGlobals.launchErrorMessage = nil
@@ -613,7 +679,9 @@ struct LibraryPage: View {
                 libraryPageGlobals.setLoader(state: false)
                 libraryPageGlobals.playingID = nil
                 libraryPageGlobals.jx3RuntimeActivity = .idle
-                libraryPageGlobals.launchErrorMessage = "无法启动剑网3：\(error.localizedDescription)"
+                if !(error is CancellationError) {
+                    libraryPageGlobals.launchErrorMessage = "无法启动剑网3：\(error.localizedDescription)"
+                }
             }
         }
     }

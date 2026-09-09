@@ -1,0 +1,6 @@
+{
+  "configurations": [{"id": "6F15B729-9018-48C2-864E-289572846E53", "name": "Isolated UI", "options": {}}],
+  "defaultOptions": {"testTimeoutsEnabled": true, "defaultTestExecutionTimeAllowance": 60, "maximumTestExecutionTimeAllowance": 90},
+  "testTargets": [{"parallelizable": false, "target": {"containerPath": "container:Arclume.xcodeproj", "identifier": "3833069F2F2BE63E00228E6C", "name": "ArclumeUITests"}}],
+  "version": 1
+}

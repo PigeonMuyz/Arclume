@@ -11,6 +11,28 @@ final class ContainerSteamStore: ObservableObject {
     @Published private(set) var detection: ContainerSteamDetection?
     @Published private(set) var snapshots: [Int: SteamInstallSnapshot] = [:]
     @Published var errorMessage: String?
+    @Published private(set) var steamSetupBusy = false
+    @Published private(set) var steamSetupDownloading = false
+    @Published private(set) var steamSetupProgress: Double?
+    @Published private(set) var steamSetupMessage: String?
+    @Published private(set) var steamSetupError: String?
+    @Published private(set) var steamOpening = false
+    private var steamSetupTask: Task<Void, Never>?
+    private var steamInstallerProcess: Process?
+    private var steamOpenTask: Task<Void, Never>?
+    private var openingRuntime: ContainerSteamRuntime?
+    private var setupRuntime: ContainerSteamRuntime?
+    @Published private(set) var steamNeedsRecovery = false
+    private var recoveryMonitor: Task<Void, Never>?
+    private var recoveryBottle: URL?
+    private var recoveryLogBaseline: UInt64 = 0
+
+    func cancelPendingBundledWineLaunches() {
+        recoveryMonitor?.cancel()
+        steamNeedsRecovery = false
+        if case .bundledWine = openingRuntime { steamOpenTask?.cancel() }
+        if case .bundledWine = setupRuntime { steamSetupTask?.cancel() }
+    }
 
     var onInstallationFinished: ((Int) -> Void)?
 
@@ -54,7 +76,132 @@ final class ContainerSteamStore: ObservableObject {
         installation != nil
     }
 
+    func cancelSteamDownload() {
+        guard steamSetupDownloading else { return }
+        steamSetupTask?.cancel()
+    }
+
+    func installSteamClient(
+        in bottle: URL,
+        using runtime: ContainerSteamRuntime,
+        installerURL: URL? = nil,
+        onInstalled: @escaping @MainActor (URL) -> Void
+    ) {
+        guard !steamSetupBusy, !steamOpening else { return }
+        guard steamInstallerProcess?.isRunning != true else {
+            steamSetupError = "上一个 Steam 安装程序仍在运行，请先完成或关闭它。"
+            return
+        }
+        if service.detect(in: bottle).installation != nil {
+            onInstalled(bottle)
+            return
+        }
+        steamSetupBusy = true
+        setupRuntime = runtime
+        steamSetupDownloading = installerURL == nil
+        steamSetupProgress = nil
+        steamSetupError = nil
+        steamSetupMessage = installerURL == nil ? "正在下载 Steam 安装程序…" : "正在打开 Steam 安装程序…"
+        steamSetupTask = Task { [weak self] in
+            guard let self else { return }
+            var downloadedInstaller: URL?
+            var installerProcess: Process?
+            defer {
+                // Do not remove files while an installer may still need them.
+                if let downloadedInstaller {
+                    let directory = downloadedInstaller.deletingLastPathComponent()
+                    if let installerProcess, installerProcess.isRunning {
+                        installerProcess.terminationHandler = { _ in
+                            try? FileManager.default.removeItem(at: directory)
+                        }
+                    }
+                    if installerProcess?.isRunning != true {
+                        try? FileManager.default.removeItem(at: directory)
+                    }
+                }
+                steamSetupBusy = false
+                steamSetupDownloading = false
+                steamSetupTask = nil
+                setupRuntime = nil
+            }
+            do {
+                let installer: URL
+                if let installerURL {
+                    installer = installerURL
+                } else {
+                    installer = try await SteamInstallerDownload.download(status: { [self] message in
+                        Task { @MainActor in
+                            guard self.steamSetupDownloading else { return }
+                            self.steamSetupMessage = message
+                        }
+                    }) { [self] value in
+                        Task { @MainActor in
+                            guard self.steamSetupDownloading else { return }
+                            self.steamSetupProgress = value
+                        }
+                    }
+                    downloadedInstaller = installer
+                }
+                try Task.checkCancellation()
+                steamSetupDownloading = false
+                steamSetupProgress = nil
+                steamSetupMessage = "正在准备 Steam 中文字体…"
+                try await service.prepareChineseFonts(in: bottle, using: runtime)
+                try Task.checkCancellation()
+                installerProcess = try service.launchInstaller(at: installer, in: bottle, using: runtime)
+                steamInstallerProcess = installerProcess
+                steamSetupMessage = "请在 Steam 安装窗口中完成安装，完成后将自动刷新。"
+                var exitedWithoutInstallation = 0
+                for _ in 0..<450 {
+                    try await Task.sleep(for: .seconds(2))
+                    if service.detect(in: bottle).installation != nil,
+                       installerProcess?.isRunning != true {
+                        steamSetupMessage = "Steam 已安装"
+                        steamSetupProgress = 1
+                        onInstalled(bottle)
+                        return
+                    }
+                    if let installerProcess, !installerProcess.isRunning,
+                       installerProcess.terminationStatus != 0 {
+                        throw NSError(domain: "SteamSetup", code: Int(installerProcess.terminationStatus),
+                                      userInfo: [NSLocalizedDescriptionKey: "Steam 安装程序已退出（\(installerProcess.terminationStatus)）。可以重试或选择本地安装包。"])
+                    }
+                    if installerProcess?.isRunning != true {
+                        exitedWithoutInstallation += 1
+                        if exitedWithoutInstallation >= 15 { break }
+                    }
+                }
+                steamSetupMessage = nil
+                steamSetupError = "尚未检测到 Steam 安装完成。请完成安装后刷新；若选择了自定义目录，请在游戏库设置中选择 Steam 路径。"
+            } catch {
+                steamSetupMessage = nil
+                if Task.isCancelled {
+                    steamSetupError = "已取消 Steam 准备或安装。可以重试，或选择本地 SteamSetup.exe。"
+                } else {
+                    steamSetupError = "Steam 安装未完成：\(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /// Refresh the client without discarding active game-download observers
+    /// when the library reloads in the same container.
+    func refreshClientDetection(bottleURL: URL?, legacyOverride: URL? = nil) {
+        guard let bottleURL,
+              detection?.bottleURL.standardizedFileURL == bottleURL.standardizedFileURL else {
+            refresh(bottleURL: bottleURL, legacyOverride: legacyOverride)
+            return
+        }
+        let override = steamOverrides[Self.bottleKey(bottleURL)] ?? legacyOverride
+        detection = service.detect(in: bottleURL, steamOverride: override)
+    }
+
     func refresh(bottleURL: URL?, legacyOverride: URL? = nil) {
+        if recoveryBottle?.standardizedFileURL != bottleURL?.standardizedFileURL {
+            recoveryMonitor?.cancel()
+            recoveryBottle = nil
+            steamNeedsRecovery = false
+        }
         stopObservingAll()
         snapshots.removeAll()
         errorMessage = nil
@@ -94,18 +241,112 @@ final class ContainerSteamStore: ObservableObject {
         openSteam(using: .crossOver(crossOverAppURL))
     }
 
-    func openSteam(using runtime: ContainerSteamRuntime) {
+    func openSteam(using runtime: ContainerSteamRuntime, onFailure: ((String) -> Void)? = nil) {
+        guard !steamOpening, !steamSetupBusy else { return }
+        errorMessage = nil
         guard let installation else {
             errorMessage = String(
                 localized: "Steam was not found in the selected Windows games container."
             )
+            onFailure?(errorMessage!)
             return
         }
 
-        do {
-            try service.openSteam(in: installation, using: runtime)
-        } catch {
-            errorMessage = error.localizedDescription
+        steamOpening = true
+        recoveryMonitor?.cancel()
+        steamNeedsRecovery = false
+        openingRuntime = runtime
+        steamOpenTask = Task {
+            defer { steamOpening = false; steamOpenTask = nil; openingRuntime = nil }
+            do {
+                try await service.prepareChineseFonts(in: installation.bottleURL, using: runtime)
+                try Task.checkCancellation()
+                let log = SteamBootstrapRecovery.logURL(in: installation.steamRootURL)
+                let baseline = SteamBootstrapRecovery.size(of: log)
+                try service.openSteam(in: installation, using: runtime)
+                if case .bundledWine = runtime { watchBootstrap(installation: installation, initialSize: baseline) }
+            } catch is CancellationError {
+                // A deliberate Stop Wine action is not a Steam launch failure.
+            } catch {
+                errorMessage = error.localizedDescription
+                onFailure?(error.localizedDescription)
+            }
+        }
+    }
+
+    private func watchBootstrap(installation: ContainerSteamInstallation, initialSize: UInt64) {
+        recoveryMonitor?.cancel()
+        recoveryBottle = installation.bottleURL
+        recoveryLogBaseline = initialSize
+        let log = SteamBootstrapRecovery.logURL(in: installation.steamRootURL)
+        let root = BundledWineRuntime.installationURL.deletingLastPathComponent().path
+        recoveryMonitor = Task { [weak self] in
+            // Only observe this launch's new log bytes. Never act on an old Shutdown.
+            var stalledSince: ContinuousClock.Instant?
+            do {
+                for _ in 0..<300 {
+                    try await Task.sleep(for: .seconds(3))
+                    guard let self, self.installation?.bottleURL == installation.bottleURL else { return }
+                    let stalled = try await Task.detached(priority: .utility) {
+                        guard let tail = try? SteamBootstrapRecovery.newTail(at: log, initialSize: initialSize),
+                              SteamBootstrapRecovery.completedButShuttingDown(tail) else { return false }
+                        let processes = try ArclumeWineStopService.snapshot(root: root, prefix: installation.bottleURL)
+                        return SteamBootstrapRecovery.hasStalledBootstrapper(processes)
+                    }.value
+                    try Task.checkCancellation()
+                    if stalled {
+                        if stalledSince == nil { stalledSince = .now }
+                        if ContinuousClock.now - stalledSince! >= .seconds(30) {
+                            self.steamNeedsRecovery = true
+                        }
+                    } else {
+                        stalledSince = nil
+                        self.steamNeedsRecovery = false
+                    }
+                }
+            } catch { /* Monitoring must not interrupt a healthy Steam session. */ }
+        }
+    }
+
+    func recoverSteamAfterUpdate(onFailure: ((String) -> Void)? = nil) {
+        guard steamNeedsRecovery, !steamOpening, !steamSetupBusy,
+              let installation, installation.bottleURL == recoveryBottle,
+              BundledWineRuntime.ownsStandardSteamPrefix(installation.bottleURL) else { return }
+        steamNeedsRecovery = false
+        recoveryMonitor?.cancel()
+        steamOpening = true
+        openingRuntime = .bundledWine
+        errorMessage = nil
+        let baseline = recoveryLogBaseline
+        steamOpenTask = Task {
+            defer { steamOpening = false; steamOpenTask = nil; openingRuntime = nil }
+            do {
+                let root = BundledWineRuntime.installationURL.deletingLastPathComponent()
+                // The confirmation may have stayed open while Steam recovered.
+                let stillStalled = try await Task.detached(priority: .utility) {
+                    let log = SteamBootstrapRecovery.logURL(in: installation.steamRootURL)
+                    let tail = try SteamBootstrapRecovery.newTail(at: log, initialSize: baseline)
+                    guard SteamBootstrapRecovery.completedButShuttingDown(tail) else { return false }
+                    return SteamBootstrapRecovery.hasStalledBootstrapper(
+                        try ArclumeWineStopService.snapshot(root: root.path, prefix: installation.bottleURL)
+                    )
+                }.value
+                try Task.checkCancellation()
+                guard stillStalled else { return }
+                try await Task.detached(priority: .userInitiated) {
+                    try await ArclumeWineStopService.stop(runtimeRoot: root, prefix: installation.bottleURL)
+                }.value
+                try Task.checkCancellation()
+                try await service.prepareChineseFonts(in: installation.bottleURL, using: .bundledWine)
+                try Task.checkCancellation()
+                let baseline = SteamBootstrapRecovery.size(of: SteamBootstrapRecovery.logURL(in: installation.steamRootURL))
+                try service.openSteam(in: installation, using: .bundledWine)
+                watchBootstrap(installation: installation, initialSize: baseline)
+            } catch is CancellationError {
+            } catch {
+                errorMessage = "重新启动 Steam 失败：\(error.localizedDescription)"
+                onFailure?(errorMessage!)
+            }
         }
     }
 

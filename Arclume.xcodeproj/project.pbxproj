@@ -10,7 +10,6 @@
 		3826404E2F2F67A500E1FCC0 /* Flow in Frameworks */ = {isa = PBXBuildFile; productRef = 3826404D2F2F67A500E1FCC0 /* Flow */; };
 		385777BD2F30B37200346515 /* Alamofire in Frameworks */ = {isa = PBXBuildFile; productRef = 385777BC2F30B37200346515 /* Alamofire */; };
 		385777C12F311EA800346515 /* Logo.icon in Resources */ = {isa = PBXBuildFile; fileRef = 385777C02F311EA800346515 /* Logo.icon */; };
-		385A91C52F2CC302006CCF47 /* ArclumeUITestsLaunchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 385A91C32F2CC302006CCF47 /* ArclumeUITestsLaunchTests.swift */; };
 		385A91CE2F2D1561006CCF47 /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 385A91CD2F2D1561006CCF47 /* Kingfisher */; };
 /* End PBXBuildFile section */
 
@@ -36,7 +35,6 @@
 		383306962F2BE63E00228E6C /* ArclumeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ArclumeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		383306A02F2BE63E00228E6C /* ArclumeUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = ArclumeUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		385777C02F311EA800346515 /* Logo.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = Logo.icon; sourceTree = "<group>"; };
-		385A91C32F2CC302006CCF47 /* ArclumeUITestsLaunchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArclumeUITestsLaunchTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -78,6 +76,7 @@
 				38E53BC32F68707F00C9FF59 /* Exceptions for "Arclume" folder in "Copy Bundle Resources" phase from "Arclume" target */,
 			);
 			explicitFolders = (
+				Resources/GameAdaptations,
 				Libs/d3dMetal3,
 				Libs/d3dMetal4,
 				Libs/d9vk,
@@ -140,7 +139,6 @@
 				383306862F2BE63D00228E6C /* Arclume */,
 				383306992F2BE63E00228E6C /* ArclumeTests */,
 				383306A32F2BE63E00228E6C /* ArclumeUITests */,
-				385A91C32F2CC302006CCF47 /* ArclumeUITestsLaunchTests.swift */,
 				3826404C2F2F67A500E1FCC0 /* Frameworks */,
 				383306852F2BE63D00228E6C /* Products */,
 				385777C02F311EA800346515 /* Logo.icon */,
@@ -325,7 +323,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				385A91C52F2CC302006CCF47 /* ArclumeUITestsLaunchTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

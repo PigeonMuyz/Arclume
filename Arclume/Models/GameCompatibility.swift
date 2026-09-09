@@ -40,16 +40,13 @@ nonisolated struct CrossOverMacRequirements: Codable, Equatable, Sendable {
 
 nonisolated struct GameCompatibilityProfile: Codable, Equatable, Sendable {
     var crossOverStatus: CrossOverCompatibility
-    var gptk4BetaEnabled: Bool
     var crossOverMacRequirements: CrossOverMacRequirements?
 
     init(
         crossOverStatus: CrossOverCompatibility = .unknown,
-        gptk4BetaEnabled: Bool = false,
         crossOverMacRequirements: CrossOverMacRequirements? = nil
     ) {
         self.crossOverStatus = crossOverStatus
-        self.gptk4BetaEnabled = gptk4BetaEnabled
         self.crossOverMacRequirements = crossOverMacRequirements
     }
 

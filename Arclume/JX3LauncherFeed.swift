@@ -387,8 +387,8 @@ struct JX3LauncherHomeView: View {
     private var compactHomeEnabled = false
 
     private let carouselInterval: TimeInterval = 7
-    private let carouselThumbnailWidth: CGFloat = 76
-    private let carouselThumbnailHeight: CGFloat = 46
+    private let carouselThumbnailWidth: CGFloat = 60
+    private let carouselThumbnailHeight: CGFloat = 36
 
     init(
         game: Game,
@@ -429,6 +429,7 @@ struct JX3LauncherHomeView: View {
                 expandedHome
             }
         }
+        .preference(key: JX3CompactHomePreferenceKey.self, value: compactHomeEnabled && !showsCloseButton)
         .task(id: compactHomeEnabled) {
             loadJX3Options()
             if feed == nil { feed = JX3LauncherFeedStore.cachedFeed() }
@@ -445,28 +446,10 @@ struct JX3LauncherHomeView: View {
 
     private var compactHome: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 18) {
                 if showsCloseButton { header }
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("剑网3旗舰版")
-                        .font(.title2.weight(.semibold))
-                    HStack(spacing: 8) {
-                        Text(OnlineGameRuntimeKind.selected() == .bundledWine ? "内置 Wine" : "CrossOver")
-                        Text("·")
-                        Text("Games 容器")
-                        Spacer()
-                        Label(runtimeActivity.state.title, systemImage: runtimeActivity.state.systemImage)
-                    }
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    Text(OnlineGameMode.onlineGraphicsBackends.first(where: {
-                        $0.id == gameOptions.cxGraphicsBackend
-                    })?.label ?? gameOptions.cxGraphicsBackend)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                runtimeSummary
                 launchSettingsColumn
-                    .frame(height: 270)
                 DisclosureGroup("公告", isExpanded: $showsCompactNotices) {
                     VStack(alignment: .leading, spacing: 8) {
                         if isRefreshing { ProgressView().controlSize(.small) }
@@ -487,8 +470,8 @@ struct JX3LauncherHomeView: View {
                     if showsCompactNotices { await refreshFeed() }
                 }
             }
-            .padding(28)
-            .frame(maxWidth: 620)
+            .padding(20)
+            .frame(maxWidth: 680)
             .frame(maxWidth: .infinity)
         }
     }
@@ -565,7 +548,7 @@ struct JX3LauncherHomeView: View {
     }
 
     private func heroHeight(for availableHeight: CGFloat) -> CGFloat {
-        min(max(availableHeight * 0.56, 360), 700)
+        min(max(availableHeight * 0.38, 190), 360)
     }
 
     @ViewBuilder
@@ -778,7 +761,8 @@ struct JX3LauncherHomeView: View {
 
     private func lowerContent(for contentWidth: CGFloat) -> some View {
         let spacing: CGFloat = 16
-        let columnWidth = max(0, (contentWidth - (spacing * 2)) / 3)
+        let launchWidth = min(320, contentWidth * 0.36)
+        let columnWidth = max(0, (contentWidth - launchWidth - (spacing * 2)) / 2)
 
         return HStack(alignment: .top, spacing: 16) {
             noticesPanel
@@ -786,7 +770,7 @@ struct JX3LauncherHomeView: View {
             newsPanel
                 .frame(width: columnWidth)
             launchSettingsColumn
-                .frame(width: columnWidth)
+                .frame(width: launchWidth)
         }
         .frame(width: contentWidth, alignment: .leading)
     }
@@ -834,25 +818,53 @@ struct JX3LauncherHomeView: View {
         }
     }
 
-    private var launchPanel: some View {
-        launcherPanel {
-            launcherPanelTitle("启动设置", systemImage: "slider.horizontal.3")
-
-            ScrollView(.vertical, showsIndicators: false) {
-                compactRuntimeSettings
-                    .padding(.bottom, 4)
+    private var runtimeSummary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("剑网3旗舰版").font(compactHomeEnabled ? .title2.weight(.semibold) : .headline)
+                Spacer(minLength: 8)
+                Label(runtimeActivity.state.title, systemImage: runtimeActivity.state.systemImage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    Text(OnlineGameRuntimeKind.selected() == .bundledWine ? "内置 Wine" : "CrossOver")
+                    Text("·")
+                    Text(graphicsBackendTitle)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(OnlineGameRuntimeKind.selected() == .bundledWine ? "内置 Wine" : "CrossOver")
+                    Text(graphicsBackendTitle)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 
+    private var graphicsBackendTitle: String {
+        OnlineGameMode.onlineGraphicsBackends.first(where: {
+            $0.id == gameOptions.cxGraphicsBackend
+        })?.label ?? gameOptions.cxGraphicsBackend
+    }
+
     private var launchSettingsColumn: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            launchPanel
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        VStack(alignment: .leading, spacing: 16) {
+            if !compactHomeEnabled {
+                runtimeSummary
+                Divider()
+            }
+            compactRuntimeSettings
+            Divider()
             launchActionArea
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 16))
+        .overlay {
+            RoundedRectangle(cornerRadius: 16).stroke(.white.opacity(0.07), lineWidth: 1)
+        }
         .sheet(item: $presentedSettings) { settings in
             Modal(
                 settings.title,
@@ -871,9 +883,7 @@ struct JX3LauncherHomeView: View {
                 case .quality:
                     if gameOptions.externalQualitySettingsEnabled {
                         JX3QualitySettingsView(
-                            bottleURL: OnlineGameDiscovery.selectedBottleURL(
-                                from: appGlobals.selectedBottle
-                            )
+                            bottleURL: OnlineGameMode.jx3BottleURL(appGlobals: appGlobals)
                         )
                     }
                 case .advanced:
@@ -896,7 +906,7 @@ struct JX3LauncherHomeView: View {
                         presentedSettings = .quality
                     } label: {
                         Label("画质设置（Beta）", systemImage: "slider.horizontal.3")
-                            .font(.headline)
+                            .font(.subheadline.weight(.medium))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 5)
                     }
@@ -908,7 +918,7 @@ struct JX3LauncherHomeView: View {
                     presentedSettings = .advanced
                 } label: {
                     Label("高级设置", systemImage: "ellipsis.circle")
-                        .font(.headline)
+                        .font(.subheadline.weight(.medium))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 5)
                 }
@@ -951,13 +961,6 @@ struct JX3LauncherHomeView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(.arclumeSecondary)
                 .disabled(isStartingJX3Runtime)
-            }
-
-            if isPlaying {
-                Label(runtimeActivity.state.title, systemImage: runtimeActivity.state.systemImage)
-                    .font(.footnote)
-                    .foregroundStyle(.white.opacity(0.72))
-                    .frame(maxWidth: .infinity, alignment: .center)
             }
         }
         .padding(.horizontal, 4)
@@ -1008,16 +1011,29 @@ struct JX3LauncherHomeView: View {
     }
 
     private var compactRuntimeSettings: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            Toggle("Metal HUD", isOn: $gameOptions.mtlHudEnabled)
-            Toggle("DLSS FG 支持", isOn: $gameOptions.dlssFrameGenerationEnabled)
-                .help("仅声明 DLSS 与帧生成能力（DLSS=2），实际开关仍需在游戏画质设置中选择。")
+        let layout = compactHomeEnabled
+            ? AnyLayout(HStackLayout(alignment: .center, spacing: 24))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: 14))
+        return layout {
+            runtimeToggle(L10n.string("Metal HUD"), isOn: $gameOptions.mtlHudEnabled)
+                .help(L10n.string("Show frame rate and GPU performance metrics."))
+            runtimeToggle(L10n.string("DLSS Frame Generation (Beta)"), isOn: $gameOptions.dlssFrameGenerationEnabled)
+                .help(L10n.string("Expose DLSS frame generation support; enable it separately in the game's graphics settings."))
         }
         .font(.subheadline)
         .controlSize(.small)
         .toggleStyle(.switch)
         .onChange(of: gameOptions.mtlHudEnabled) { _, _ in persistJX3Options() }
         .onChange(of: gameOptions.dlssFrameGenerationEnabled) { _, _ in persistJX3Options() }
+    }
+
+    private func runtimeToggle(_ title: String, isOn: Binding<Bool>) -> some View {
+        HStack(spacing: 12) {
+            Text(title).fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 4)
+            Toggle(title, isOn: isOn).labelsHidden()
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func feedRow(title: String, subtitle: String?, url: URL?) -> some View {

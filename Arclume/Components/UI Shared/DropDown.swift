@@ -11,6 +11,7 @@ struct DropDown: View {
     var options: DropdownOptions
     var label: String
     @Binding var value: String
+    var controlIdentifier: String = ""
     
     var body: some View {
         if OSVersion < 27 {
@@ -19,6 +20,7 @@ struct DropDown: View {
                     Text(label).tag(id)
                 }
             }
+            .accessibilityIdentifier(controlIdentifier)
         } else {
             HStack {
                 Text(label).lineLimit(1)
@@ -39,6 +41,7 @@ struct DropDown: View {
                     Text(options.first(where: { $0.id == value })?.label ?? L10n.string("Select"))
                 }
                 .fixedSize()
+                .accessibilityIdentifier(controlIdentifier)
             }
         }
     }

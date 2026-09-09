@@ -1,76 +1,71 @@
-//
-//  ArclumeToolbar.swift
-//  Arclume
-//
-//  Created by Italo Mandara on 07/04/2026.
-//
-
 import SwiftUI
 
 struct ArclumeToolbar: View {
     @EnvironmentObject var appGlobals: AppGlobals
     @EnvironmentObject var libraryPageGlobals: LibraryPageGlobals
-    
-    let iconSize:CGFloat = 20
+    @EnvironmentObject var containerSteamStore: ContainerSteamStore
+    @EnvironmentObject var windowsInstallerStore: WindowsInstallerStore
+    @State private var steamLaunchError: String?
+
     var body: some View {
-        HStack(alignment: .center) {
-            Button {
-                libraryPageGlobals.showOptions = true
-            } label: {
-                Image(systemName: "gear")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: iconSize, height: iconSize)
-            }
-            .accessibilityIdentifier("library-settings-button")
-            .help(L10n.string("Options"))
-            if !OnlineGameMode.isEnabled {
-                Divider()
+        HStack(spacing: 8) {
+            if containerSteamStore.isReady {
+                SteamUpdateRecoveryControl()
                 Button {
+                    containerSteamStore.openSteam(using: .bundledWine) { steamLaunchError = $0 }
+                } label: {
+                    Label {
+                        Text(containerSteamStore.steamOpening ? "准备 Steam…" : "打开 Steam")
+                    } icon: {
+                        Image("steam-fill").resizable().scaledToFit().frame(width: 16, height: 16)
+                    }
+                }
+                .disabled(libraryPageGlobals.isStoppingWine || containerSteamStore.steamOpening)
+                .accessibilityIdentifier("library-open-steam-button")
+                .help("打开当前 Windows 游戏容器中的 Steam")
+            }
+            Menu {
+                Button("安装 Windows 程序…", systemImage: "shippingbox.and.arrow.backward") {
+                    libraryPageGlobals.showWindowsInstaller = true
+                }
+                Button("添加已安装游戏…", systemImage: "gamecontroller") {
                     libraryPageGlobals.openCustomGameEditor()
-                } label: {
-                    Image(systemName: "rectangle.badge.plus").resizable().scaledToFit().frame(width: iconSize, height: iconSize)
                 }
+            } label: {
+                Label(windowsInstallerStore.busy ? "正在安装…" : "添加游戏", systemImage: "plus")
             }
-            if appGlobals.cxAppPath != nil,
-               (!OnlineGameMode.isEnabled
-                    || OnlineGameRuntimeKind.selected() == .crossOver) {
-                Divider()
-                Button {
-                    if let cxPath = appGlobals.cxAppPath {
-                        let url = URL(fileURLWithPath: cxPath)
-                        let configuration = NSWorkspace.OpenConfiguration()
-                        configuration.environment = [
-                            "CX_GRAPHICS_BACKEND": "d3dmetal",
-                            "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS": "0"
-                        ]
-                        NSWorkspace.shared.open(url, configuration: configuration)
-                    }
-                } label: {
-                    Image("crossover-fill").resizable().scaledToFit().frame(width: iconSize, height: iconSize)
+            .accessibilityIdentifier("library-add-game-button")
+
+            Menu {
+                if let bottle = OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle) {
+                    Button("打开容器文件夹") { showFolder(url: bottle) }
                 }
-            }
-            if appGlobals.selectedBottle != "" {
-                Divider()
-                Button {
-                    if let selectedBottleURL = URL(string: appGlobals.selectedBottle){
-                        showFolder(url: selectedBottleURL)
-                    }
-                } label: {
-                    Image(systemName: "waterbottle").resizable().scaledToFit().frame(width: iconSize, height: iconSize)
+                Button("管理运行时与容器…") {
+                    libraryPageGlobals.requestedSettingsPage = "运行时"
+                    libraryPageGlobals.showOptions = true
                 }
+            } label: {
+                Label("容器", systemImage: "shippingbox")
             }
-            Divider()
+
             Button {
                 libraryPageGlobals.showTools = true
             } label: {
-                Image(systemName: "wrench.adjustable.fill").resizable().scaledToFit().frame(width: iconSize, height: iconSize)
+                Label("工具", systemImage: "wrench.and.screwdriver")
             }
         }
-        .buttonStyle(.plain)
-        .padding(.horizontal, 15)
-        .frame(height: 35)
-        .background(.arclumeAccent.mix(with: .black, by: 0.6).opacity(0.9))
-        .clipShape(.capsule)
+        .buttonStyle(.bordered)
+        .controlSize(.large)
+        .fixedSize()
+        .padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .alert("无法打开 Steam", isPresented: Binding(
+            get: { steamLaunchError != nil },
+            set: { if !$0 { steamLaunchError = nil } }
+        )) {
+            Button("好", role: .cancel) { steamLaunchError = nil }
+        } message: {
+            Text(steamLaunchError ?? "")
+        }
     }
 }

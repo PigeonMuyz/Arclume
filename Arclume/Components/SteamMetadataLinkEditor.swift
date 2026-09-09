@@ -23,7 +23,7 @@ struct SteamMetadataLinkEditor: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(
                     L10n.string(
-                        "Link a native game to a confirmed Steam app for display metadata. Its native launch identity will not change."
+                        "关联已确认的 Steam 游戏资料，仅更新展示信息，不改变本地启动路径或容器。"
                     )
                 )
                 .font(.footnote)

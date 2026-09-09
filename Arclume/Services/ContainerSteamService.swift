@@ -12,7 +12,7 @@ nonisolated struct ContainerSteamLaunchRequest: Equatable, Sendable {
     let environmentOverrides: [String: String]
 }
 
-enum ContainerSteamRuntime {
+nonisolated enum ContainerSteamRuntime: Sendable {
     case crossOver(URL)
     case bundledWine
 }
@@ -25,6 +25,11 @@ nonisolated protocol ContainerSteamProcessLaunching {
 nonisolated struct FoundationContainerSteamProcessLauncher: ContainerSteamProcessLaunching {
     @discardableResult
     func launch(_ request: ContainerSteamLaunchRequest) throws -> Process {
+        let isBundled = ArclumeWineStopService.belongsToRuntime(
+            request.executableURL.resolvingSymlinksInPath().path,
+            root: BundledWineRuntime.installationURL.deletingLastPathComponent().resolvingSymlinksInPath().path
+        )
+        let ticket = isBundled ? try ArclumeWineStopService.launchTicket() : nil
         let process = Process()
         process.executableURL = request.executableURL
         process.arguments = request.arguments
@@ -36,7 +41,8 @@ nonisolated struct FoundationContainerSteamProcessLauncher: ContainerSteamProces
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
+        if let ticket { try ArclumeWineStopService.withLaunchTicket(ticket) { try process.run() } }
+        else { try process.run() }
         return process
     }
 }
@@ -284,10 +290,11 @@ nonisolated struct ContainerSteamService {
                     installation.steamExecutableURL.path,
                 ] + steamArguments,
                 currentDirectoryURL: installation.steamRootURL,
-                environmentOverrides: [
+                environmentOverrides: OnlineGameBottleConfiguration.environment.merging([
+                    "CX_BOTTLE_PATH": installation.bottleURL.deletingLastPathComponent().path,
                     "CX_GRAPHICS_BACKEND": "d3dmetal",
                     "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS": "0",
-                ]
+                ], uniquingKeysWith: { _, value in value })
             )
         case .bundledWine:
             guard BundledWineRuntime.ownsStandardSteamPrefix(installation.bottleURL),
@@ -300,11 +307,151 @@ nonisolated struct ContainerSteamService {
             environment["WINEPREFIX"] = installation.bottleURL.path
             return ContainerSteamLaunchRequest(
                 executableURL: configuration.wineURL,
-                arguments: [installation.steamExecutableURL.path] + steamArguments,
+                arguments: [installation.steamExecutableURL.path]
+                    + SteamClientCompatibility.arguments(bundledWine: true) + steamArguments,
                 currentDirectoryURL: installation.steamRootURL,
                 environmentOverrides: environment
             )
         }
+    }
+
+    /// Bootstrap the Windows Steam client in the captured container, not the
+    /// container that happens to be selected when the download finishes.
+    @discardableResult
+    func launchInstaller(at installer: URL, in bottle: URL, using runtime: ContainerSteamRuntime) throws -> Process {
+        guard fileManager.fileExists(atPath: bottle.appendingPathComponent("drive_c").path) else {
+            throw ContainerSteamServiceError.invalidBottle(bottle)
+        }
+        let handle = try FileHandle(forReadingFrom: installer)
+        defer { try? handle.close() }
+        guard try handle.read(upToCount: 2) == Data([0x4d, 0x5a]) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        return try processLauncher.launch(makePrefixRequest(
+            in: bottle, using: runtime, windowsArguments: [installer.path],
+            currentDirectory: installer.deletingLastPathComponent()
+        ))
+    }
+
+    func prepareChineseFonts(in bottle: URL, using runtime: ContainerSteamRuntime) async throws {
+        // Validate runtime ownership before writing anything into a prefix.
+        let baseRequest = try makePrefixRequest(
+            in: bottle, using: runtime, windowsArguments: ["reg.exe"], currentDirectory: bottle
+        )
+        guard let fontURL = await BundledOnlineGameResources.chineseFontURL() else {
+            throw NSError(domain: "Arclume.SteamFonts", code: 1, userInfo: [
+                NSLocalizedDescriptionKey: "应用内缺少中文字体资源，无法准备 Steam 中文显示。"
+            ])
+        }
+        let runtimeVersion: String
+        switch runtime {
+        case .bundledWine:
+            runtimeVersion = BundledWineRuntime.installedRuntimeVersion(at: BundledWineRuntime.installationURL) ?? "unknown"
+        case .crossOver(let app):
+            let info = Bundle(url: app)?.infoDictionary
+            runtimeVersion = "\(info?["CFBundleShortVersionString"] ?? "unknown")-\(info?["CFBundleVersion"] ?? "unknown")"
+        }
+        let wineURL = baseRequest.executableURL
+        let stamp = try await Task.detached(priority: .utility) {
+            try SteamContainerLocalization.preparationStamp(in: bottle, fontURL: fontURL,
+                wineURL: wineURL, runtimeVersion: runtimeVersion)
+        }.value
+        let alreadyPrepared = await Task.detached(priority: .utility) {
+            SteamContainerLocalization.isPrepared(in: bottle, stamp: stamp)
+        }.value
+        try Task.checkCancellation()
+        if alreadyPrepared { return }
+        // Read the live registry through Wine, not the potentially stale .reg
+        // backing files. Keep any existing user-defined fallback fonts.
+        let exportDirectory = fileManager.temporaryDirectory.appendingPathComponent("Arclume-SteamFontExport-\(UUID().uuidString)")
+        try fileManager.createDirectory(at: exportDirectory, withIntermediateDirectories: false)
+        defer { try? fileManager.removeItem(at: exportDirectory) }
+        var exports: [String: String] = [:]
+        for key in ["FontLink\\SystemLink", "FontSubstitutes"] {
+            let file = exportDirectory.appendingPathComponent("\(exports.count).reg")
+            let path = "Z:" + file.path.replacingOccurrences(of: "/", with: "\\")
+            try await runFontRegistry(baseRequest, arguments: ["export",
+                "HKEY_LOCAL_MACHINE\\Software\\Microsoft\\Windows NT\\CurrentVersion\\\(key)", path, "/y"])
+            exports[key] = try String(contentsOf: file, encoding: .utf16)
+        }
+        let fontLinks = exports["FontLink\\SystemLink"]!
+        let fontSubstitutes = exports["FontSubstitutes"]!
+        let registry = try await Task.detached(priority: .utility) {
+            try SteamContainerLocalization.prepareFiles(in: bottle, fontURL: fontURL,
+                fontLinks: fontLinks, fontSubstitutes: fontSubstitutes)
+        }.value
+        defer { try? FileManager.default.removeItem(at: registry.deletingLastPathComponent()) }
+        let windowsPath = "Z:" + registry.path.replacingOccurrences(of: "/", with: "\\")
+        // Steam's bootstrapper is 32-bit; games can use the 64-bit view.
+        for view in ["/reg:64", "/reg:32"] {
+            try await runFontRegistry(baseRequest, arguments: ["import", windowsPath, view])
+        }
+        try Task.checkCancellation()
+        // Commit only after both registry views succeeded; failed/cancelled
+        // preparation must remain retryable on the next launch.
+        try SteamContainerLocalization.markPrepared(in: bottle, stamp: stamp)
+    }
+
+    private func runFontRegistry(_ baseRequest: ContainerSteamLaunchRequest, arguments: [String]) async throws {
+        try Task.checkCancellation()
+        let request = ContainerSteamLaunchRequest(
+            executableURL: baseRequest.executableURL,
+            arguments: baseRequest.arguments + arguments,
+            currentDirectoryURL: baseRequest.currentDirectoryURL,
+            environmentOverrides: baseRequest.environmentOverrides
+        )
+        let process = try processLauncher.launch(request)
+        defer { if process.isRunning { process.terminate() } }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(30))
+        while process.isRunning {
+            try Task.checkCancellation()
+            guard ContinuousClock.now < deadline else {
+                throw NSError(domain: "Arclume.SteamFonts", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "准备 Steam 中文字体超时，请关闭此容器中的 Steam 后重试。"
+                ])
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        guard process.terminationReason == .exit, process.terminationStatus == 0 else {
+            throw NSError(domain: "Arclume.SteamFonts", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "处理 Steam 中文字体配置失败（\(process.terminationStatus)）。"
+            ])
+        }
+    }
+
+    private func makePrefixRequest(
+        in bottle: URL, using runtime: ContainerSteamRuntime,
+        windowsArguments: [String], currentDirectory: URL
+    ) throws -> ContainerSteamLaunchRequest {
+        let wine: URL
+        let arguments: [String]
+        var environment: [String: String]
+        switch runtime {
+        case .crossOver(let app):
+            wine = app.appendingPathComponent("Contents/SharedSupport/CrossOver/bin/wine")
+            guard fileManager.isExecutableFile(atPath: wine.path) else {
+                throw ContainerSteamServiceError.crossOverWineMissing(wine)
+            }
+            arguments = ["--bottle", bottle.lastPathComponent] + windowsArguments
+            environment = ["CX_BOTTLE_PATH": bottle.deletingLastPathComponent().path]
+        case .bundledWine:
+            guard BundledWineRuntime.ownsStandardSteamPrefix(bottle),
+                  BundledWineRuntime.isValidPrefix(at: bottle) else {
+                throw ContainerSteamServiceError.invalidBottle(bottle)
+            }
+            let configuration = try BundledWineRuntime.makeDefaultLaunchConfiguration()
+            wine = configuration.wineURL
+            arguments = windowsArguments
+            environment = configuration.environment
+            environment["WINEPREFIX"] = bottle.path
+        }
+        OnlineGameBottleConfiguration.applyProcessEnvironment(to: &environment)
+        return ContainerSteamLaunchRequest(
+            executableURL: wine,
+            arguments: arguments,
+            currentDirectoryURL: currentDirectory,
+            environmentOverrides: environment
+        )
     }
 
     private func normalizeOverride(_ overrideURL: URL) -> URL {

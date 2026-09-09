@@ -384,7 +384,6 @@ enum BundledWineRuntime {
         )
     )
     nonisolated static let versionMarkerFileName = ".arclume-runtime-version"
-    nonisolated static let dockApplicationName = "剑网3旗舰版"
 
     nonisolated static var manifest: ArclumeRuntimeManifest {
         (try? requiredRuntimeManifest()) ?? fallbackManifest
@@ -905,8 +904,7 @@ enum BundledWineRuntime {
         environment["WINEMSYNC"] = wineMSync ? "1" : "0"
         environment["ROSETTA_ADVERTISE_AVX"] = "1"
         environment["PROCYON_NO_GPFAULT_ERROR_DIALOG"] = "1"
-        environment["PROCYON_WINE_DOCK_NAME"] = dockApplicationName
-        environment["WINEPRELOADERAPPNAME"] = dockApplicationName
+        environment = GameAdaptationRules.processEnvironment(environment)
         environment["MTL_HUD_ENABLED"] = mtlHudEnabled ? "1" : "0"
         environment["__CX_UNIX_MTL_HUD_ENABLED"] = mtlHudEnabled ? "1" : "0"
         OnlineGameBottleConfiguration.applyProcessEnvironment(to: &environment)

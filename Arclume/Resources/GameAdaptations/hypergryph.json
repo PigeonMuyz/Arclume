@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "processNames": [
+    {"executable": "Endfield.exe", "name": "明日方舟：终末地", "ruleID": "endfield"},
+    {"executable": "Launcher.exe", "name": "鹰角启动器", "ruleID": "hypergryph-launcher"}
+  ],
+  "rules": [
+    {
+      "id": "hypergryph-launcher",
+      "name": "鹰角启动器",
+      "kind": "launcher",
+      "installDirectory": "Program Files/Hypergryph Launcher",
+      "executable": "Launcher.exe",
+      "alternateExecutables": ["Games.exe"],
+      "requiredFiles": [],
+      "ancestorDirectoryName": "Hypergryph Launcher",
+      "defaultArguments": [],
+      "launcherRemovalEntries": ["Launcher.exe", "Uninstall.exe", "Cache", "CrashSightLog"],
+      "launcherVersionDirectories": true,
+      "installer": { "filenamePrefix": "HypergryphLauncher_", "engine": "nsis", "signature": "NullsoftInst" }
+    },
+    {
+      "id": "endfield",
+      "name": "明日方舟：终末地",
+      "kind": "game",
+      "installDirectory": "Program Files/Hypergryph Launcher/games/Arknights Endfield",
+      "executable": "Endfield.exe",
+      "alternateExecutables": [],
+      "requiredFiles": ["UnityPlayer.dll", "Endfield_Data/boot.config"],
+      "launcherID": "hypergryph-launcher",
+      "gameDBID": 194558,
+      "defaultArguments": [["-launcher_lang=zh-cn"], ["-launcher_sub_channel=1"], ["-screen-fullscreen", "0"], ["-screen-width", "1280"], ["-screen-height", "720"]],
+      "userDataDirectory": "AppData/LocalLow/Hypergryph/Endfield",
+      "dataEntries": [
+        {"name": "Player.log", "category": "logs"},
+        {"name": "Player-prev.log", "category": "logs"},
+        {"name": "sdklogs", "category": "logs"},
+        {"name": "ClientData", "category": "local"},
+        {"name": "sdkdata", "category": "login"},
+        {"name": "sdk_data_", "category": "login", "hexSuffixLength": 32}
+      ],
+      "registryKey": "Software\\\\Hypergryph\\\\Endfield"
+    }
+  ]
+}

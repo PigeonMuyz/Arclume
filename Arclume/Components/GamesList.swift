@@ -54,6 +54,16 @@ struct GamesList: View {
                 .padding(.horizontal, gameGridHorizontalPadding)
                 .padding(.bottom)
             }
+            .overlay {
+                if filteredGames.isEmpty {
+                    ContentUnavailableView(
+                        "没有符合筛选条件的游戏",
+                        systemImage: "line.3.horizontal.decrease.circle",
+                        description: Text("试试更改顶部筛选条件，或通过底部“添加游戏”导入游戏。")
+                    )
+                    .allowsHitTesting(false)
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

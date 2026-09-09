@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "rules": [],
+  "processNames": [
+    {"executable": "JX3ClientX64.exe", "name": "剑网3旗舰版", "ancestorDirectoryName": "JX3"},
+    {"executable": "SeasunGame.exe", "name": "剑网3启动器", "ancestorDirectoryName": "SeasunGame"}
+  ]
+}

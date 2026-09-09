@@ -26,11 +26,15 @@ struct GameThumbnail: View {
     @State private var coverDidFail = false
     @State private var coverTimedOut = false
     @State private var showRemoveConfirmation = false
+    @State private var showMetadataSearch = false
+    @State private var showUninstall = false
     @State private var isHovering = false
     @State private var cardLogoDidFail = false
     @State private var showCardPresentationEditor = false
     @State private var showJX3LauncherHome = false
     @State private var jx3LauncherFeed: JX3LauncherFeed?
+    @State private var windowsAppIcon: NSImage?
+    @State private var showGreenPreparation = false
 
     private var coverURL: URL? {
         let urlString = item.headerImage.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -155,7 +159,7 @@ struct GameThumbnail: View {
         case .nativeSteam:
             return L10n.string("Install with Steam for macOS")
         case .containerSteam:
-            return L10n.string("Install with Steam in the selected CrossOver bottle")
+            return "通过 Arclume Wine 容器中的 Steam 安装"
         case .unavailable:
             if hasSteamAccountMismatch {
                 return L10n.string(
@@ -176,10 +180,11 @@ struct GameThumbnail: View {
     }
 
     private var isOnlineJX3: Bool {
-        OnlineGameMode.isEnabled && item.id == OnlineGameMode.jx3GameID
+        OnlineGameMode.isJX3(item)
     }
 
     private var cardLogoURL: URL? {
+        guard !ArclumeTestEnvironment.isTesting else { return nil }
         if let presentationLogoURL = OnlineGamePresentationStore.logoURL(for: item.id) {
             return presentationLogoURL
         }
@@ -213,8 +218,8 @@ struct GameThumbnail: View {
                             .scaledToFill()
                             .frame(width: proxy.size.width, height: proxy.size.height)
                             .clipped()
-                    } else if let nativeAppIcon {
-                        NativeGameCoverIcon(icon: nativeAppIcon)
+                    } else if let icon = nativeAppIcon ?? windowsAppIcon {
+                        NativeGameCoverIcon(icon: icon)
                             .frame(width: proxy.size.width, height: proxy.size.height)
                     } else {
                         GameCoverFallback()
@@ -255,6 +260,13 @@ struct GameThumbnail: View {
 
     private var standardThumbnail: some View {
         cardSizedCanvas
+        .task(id: item.appExeURL?.path) {
+            windowsAppIcon = nil
+            guard !item.isNative, let executable = GameRemovalService.target(for: item) else { return }
+            let data = await WindowsExecutableIconCache.shared.load(executable)
+            guard !Task.isCancelled else { return }
+            windowsAppIcon = data.flatMap(NSImage.init(data:))
+        }
         .onContinuousHover { phase in
             let hovering: Bool
             switch phase {
@@ -285,6 +297,7 @@ struct GameThumbnail: View {
             }
 
             if item.isCustom == true {
+                Button("补全游戏资料…", systemImage: "sparkle.magnifyingglass") { showMetadataSearch = true }
                 Button {
                     libraryPageGlobals.openCustomGameEditor(for: item)
                 } label: {
@@ -296,7 +309,13 @@ struct GameThumbnail: View {
                 Button(role: .destructive) {
                     showRemoveConfirmation = true
                 } label: {
-                    Label(L10n.string("Remove from Arclume"), systemImage: "trash")
+                    Label("从游戏库隐藏", systemImage: "eye.slash")
+                }
+                if !item.isNative {
+                    if let executable = GameRemovalService.target(for: item), GameAdaptationRules.matching(executable)?.greenPreparation != nil {
+                        Button("应用绿色适配…", systemImage: "leaf") { showGreenPreparation = true }
+                    }
+                    Button("卸载…", systemImage: "trash", role: .destructive) { showUninstall = true }
                 }
             }
         }
@@ -306,6 +325,15 @@ struct GameThumbnail: View {
                 isPresented: $showCardPresentationEditor,
                 onSave: updateGamePresentation
             )
+        }
+        .sheet(isPresented: $showMetadataSearch) {
+            GameDBMetadataView(game: item).environmentObject(libraryPageGlobals)
+        }
+        .sheet(isPresented: $showUninstall) {
+            GameRemovalView(game: item).environmentObject(libraryPageGlobals)
+        }
+        .sheet(isPresented: $showGreenPreparation) {
+            PortableGreenPreparationView(game: item)
         }
         .sheet(isPresented: $showJX3LauncherHome) {
             JX3LauncherHomeView(
@@ -346,16 +374,16 @@ struct GameThumbnail: View {
             Text(libraryPageGlobals.launchErrorMessage ?? "")
         }
         .confirmationDialog(
-            L10n.format("Remove %@ from Arclume?", displayName),
+            "从游戏库隐藏 \(displayName)？",
             isPresented: $showRemoveConfirmation,
             titleVisibility: .visible
         ) {
-            Button(L10n.string("Remove"), role: .destructive) {
+            Button("隐藏") {
                 libraryPageGlobals.deleteCustomAddedGame(game: item)
             }
             Button(L10n.string("Cancel"), role: .cancel) { }
         } message: {
-            Text(L10n.string("This only removes the game from Arclume and does not delete its app or files."))
+            Text("保留所有文件。自动扫描不会重新添加；可在设置 → 游戏库中恢复已隐藏入口。")
         }
         .task(id: coverURL?.absoluteString) {
             coverDidLoad = false
@@ -531,9 +559,7 @@ struct GameThumbnail: View {
     }
 
     private func stopOnlineGame() {
-        guard let bottleURL = OnlineGameDiscovery.selectedBottleURL(
-            from: appGlobals.selectedBottle
-        ) else {
+        guard let bottleURL = OnlineGameMode.jx3BottleURL(appGlobals: appGlobals) else {
             return
         }
         libraryPageGlobals.setLoader(state: false)
@@ -608,7 +634,7 @@ struct GameThumbnail: View {
         // Do not turn the global loading state on when the game is already
         // running. The previous ordering left the launcher permanently in a
         // disabled/loading state after a second click.
-        guard !isPlaying else { return }
+        guard !isPlaying, !libraryPageGlobals.isStoppingWine else { return }
 
         libraryPageGlobals.selectedGame = updatedItem
         libraryPageGlobals.launchErrorMessage = nil
@@ -624,14 +650,9 @@ struct GameThumbnail: View {
                 } else {
                     console.warn("failed to retrieve game options")
                 }
-                if item.usesCrossOverRuntime && !usesNativeSteamRuntime {
-                    compatibilityStore.applyRuntimePreferences(for: item, to: gameOptions)
-                }
-                if OnlineGameMode.isEnabled, item.id == OnlineGameMode.jx3GameID {
+                if OnlineGameMode.isJX3(item) {
                     OnlineGameMode.applyDefaultRuntimePreferences(to: gameOptions)
-                    guard let bottleURL = OnlineGameDiscovery.selectedBottleURL(
-                        from: appGlobals.selectedBottle
-                    ) else {
+                    guard let bottleURL = OnlineGameMode.jx3BottleURL(appGlobals: appGlobals) else {
                         throw CocoaError(.fileNoSuchFile)
                     }
                     let crossOverPath = appGlobals.cxAppPath
@@ -704,7 +725,7 @@ struct GameThumbnail: View {
                 } else {
                     Task(priority: .background) {
                         do {
-                            tObserver = try await getGameTracker(appNames: updatedItem.appNames, cxAppPath: appGlobals.cxAppPath, bottleName: appGlobals.selectedBottle, onLoad: {
+                            tObserver = try await getGameTracker(appNames: updatedItem.appNames, cxAppPath: item.installedCrossOverPath ?? appGlobals.cxAppPath, bottleName: item.installedBottleURL?.absoluteString ?? appGlobals.selectedBottle, onLoad: {
                                 libraryPageGlobals.playingID = item.id
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                                     libraryPageGlobals.setLoader(state: false)
@@ -714,6 +735,7 @@ struct GameThumbnail: View {
                                 libraryPageGlobals.playingID = nil
                                 tObserver = nil
                             }, isNative: item.isNative,
+                            stopSteamOnTermination: item.installedBottleURL == nil,
                             steamAppID: item.isCustom == true ? nil : item.steamAppID,
                             steamRootURL: appGlobals.windowsSteamFolder)
                         } catch {
@@ -727,15 +749,17 @@ struct GameThumbnail: View {
                         return
                     }
                     let steamExePath = appGlobals.windowsSteamFolder?.appendingPathComponent("Steam.exe").path(percentEncoded: false) ?? "C:\\Program Files (x86)\\Steam\\Steam.exe"
-                    try await launchWindowsGame(id: String(item.steamAppID), cxAppPath: appGlobals.cxAppPath, selectedBottle: appGlobals.selectedBottle, steamExePath: steamExePath, options: gameOptions, appExeURL: item.appExeURL)
+                    try await launchWindowsGame(id: String(item.steamAppID), cxAppPath: item.installedCrossOverPath ?? appGlobals.cxAppPath, selectedBottle: item.installedBottleURL?.absoluteString ?? appGlobals.selectedBottle, steamExePath: steamExePath, options: gameOptions, appExeURL: item.appExeURL, installedRuntimeKind: item.installedRuntimeKind)
                 }
             } catch {
                 console.error(String(reflecting: error))
                 libraryPageGlobals.setLoader(state: false)
-                if OnlineGameMode.isEnabled, item.id == OnlineGameMode.jx3GameID {
+                if OnlineGameMode.isJX3(item) {
                     libraryPageGlobals.playingID = nil
                     libraryPageGlobals.jx3RuntimeActivity = .idle
-                    libraryPageGlobals.launchErrorMessage = "无法启动剑网3：\(error.localizedDescription)"
+                    if !(error is CancellationError) {
+                        libraryPageGlobals.launchErrorMessage = "无法启动剑网3：\(error.localizedDescription)"
+                    }
                 }
             }
         }

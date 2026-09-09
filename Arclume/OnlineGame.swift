@@ -8,8 +8,8 @@ import Metal
 
 enum OnlineGameMode {
     static let jx3GameID = "online.jx3.flagship"
-    static let jx3ClientName = "JX3ClientX64.exe"
-    static let jx3LauncherName = "SeasunGame.exe"
+    nonisolated static let jx3ClientName = "JX3ClientX64.exe"
+    nonisolated static let jx3LauncherName = "SeasunGame.exe"
     static let defaultBottleName = "Games"
     static let jx3GameDirectoryComponents = [
         "drive_c", "SeasunGame", "Game", "JX3", "bin", "zhcn_hd"
@@ -73,11 +73,19 @@ enum OnlineGameMode {
     }
 
     static func isJX3(_ game: Game) -> Bool {
-        isEnabled && game.id == jx3GameID
+        game.id == jx3GameID
+    }
+
+    /// Library presentation must not change which container owns the game.
+    /// In standard mode selectedBottle belongs to Steam, not to JX3.
+    static func jx3BottleURL(appGlobals: AppGlobals) -> URL? {
+        if isEnabled {
+            return OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle)
+        }
+        return OnlineGameRuntimeKind.configuredBottleURL(for: .selected())
     }
 
     static func applyDefaultRuntimePreferences(to options: GameOptions) {
-        guard isEnabled else { return }
         let resolvedBackend = resolvedGraphicsBackend(
             options.cxGraphicsBackend,
             supportingD3DMetal4: supportsD3DMetal4
@@ -99,7 +107,7 @@ enum OnlineGameMode {
     }
 }
 
-struct OnlineGameInstallation: Sendable {
+nonisolated struct OnlineGameInstallation: Sendable {
     let clientURL: URL?
     let launcherURL: URL?
     let workingDirectoryURL: URL?
@@ -167,7 +175,7 @@ enum OnlineGameDiscovery {
         return gameDirectoryURL.appendingPathComponent("bin64", isDirectory: true)
     }
 
-    static func jx3Installation(in bottleURL: URL) -> OnlineGameInstallation {
+    nonisolated static func jx3Installation(in bottleURL: URL) -> OnlineGameInstallation {
         let driveC = bottleURL.appendingPathComponent("drive_c", isDirectory: true)
         guard FileManager.default.fileExists(atPath: driveC.path) else {
             return OnlineGameInstallation(
@@ -217,7 +225,7 @@ enum OnlineGameDiscovery {
         )
     }
 
-    private static func preferredWorkingDirectory(for launcherURL: URL?) -> URL? {
+    nonisolated private static func preferredWorkingDirectory(for launcherURL: URL?) -> URL? {
         guard let launcherURL else { return nil }
         let launcherRoot = launcherURL.deletingLastPathComponent()
         let fileManager = FileManager.default
@@ -249,7 +257,10 @@ enum OnlineGameDiscovery {
     }
 
     static func games(in bottleURL: URL) -> [Game] {
-        let installation = jx3Installation(in: bottleURL)
+        games(from: jx3Installation(in: bottleURL))
+    }
+
+    static func games(from installation: OnlineGameInstallation) -> [Game] {
         guard installation.isDetected else { return [] }
 
         // Metadata stays deliberately empty until it is supplied by the game

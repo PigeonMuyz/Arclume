@@ -15,14 +15,12 @@ struct GameCompatibilityStoreTests {
 
         let store = GameCompatibilityStore(defaults: fixture.defaults)
         store.setCrossOverStatus(.supported, for: 620)
-        store.setGPTK4BetaEnabled(true, for: 620)
 
         let reloaded = GameCompatibilityStore(defaults: fixture.defaults)
         #expect(
             reloaded.profile(for: 620)
                 == GameCompatibilityProfile(
-                    crossOverStatus: .supported,
-                    gptk4BetaEnabled: true
+                    crossOverStatus: .supported
                 )
         )
         #expect(reloaded.profile(for: 999) == .defaultProfile)
@@ -70,7 +68,8 @@ struct GameCompatibilityStoreTests {
         let profile = GameCompatibilityStore(defaults: fixture.defaults).profile(for: 620)
 
         #expect(profile.crossOverStatus == .supported)
-        #expect(profile.gptk4BetaEnabled)
+        let encoded = try JSONEncoder().encode(profile)
+        #expect(!String(decoding: encoded, as: UTF8.self).contains("gptk4BetaEnabled"))
         #expect(profile.crossOverMacRequirements == nil)
     }
 
@@ -253,20 +252,17 @@ struct GameCompatibilityStoreTests {
         )
     }
 
-    @Test func gptk4PreferenceConfiguresTheRuntime() throws {
+    @Test func legacyCustomGPTKPreferenceIsIgnoredWithoutLosingCompatibility() throws {
         let fixture = try DefaultsFixture()
         defer { fixture.remove() }
+        fixture.defaults.set(Data(#"{"custom":{"crossOverStatus":"supported","gptk4BetaEnabled":true}}"#.utf8),
+            forKey: "gameCompatibilityProfiles.custom.v1")
         let store = GameCompatibilityStore(defaults: fixture.defaults)
-        let options = GameOptions(cxGraphicsBackend: "dxvk")
-
-        store.applyRuntimePreferences(for: 620, to: options)
-        #expect(options.cxGraphicsBackend == "dxvk")
-        #expect(!options.d3dMtl4Enabled)
-
-        store.setGPTK4BetaEnabled(true, for: 620)
-        store.applyRuntimePreferences(for: 620, to: options)
-        #expect(options.cxGraphicsBackend == "d3dmetal4")
-        #expect(options.d3dMtl4Enabled)
+        var game = Game.emptyGame
+        game.id = "custom"
+        let profile = store.profile(for: game)
+        #expect(profile.crossOverStatus == .supported)
+        #expect(!String(decoding: try JSONEncoder().encode(profile), as: UTF8.self).contains("gptk4BetaEnabled"))
     }
 }
 

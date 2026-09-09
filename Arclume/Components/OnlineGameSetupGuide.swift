@@ -349,22 +349,9 @@ struct OnlineGameSetupGuide: View {
             switch stage {
             case .runtime:
                 stageHeader(
-                    "选择剑网3运行时",
-                    detail: "两种运行时会使用独立的 Games 容器。后续会继续使用本次选择，不会改写你已有的 CrossOver。"
+                    "准备剑网3运行时",
+                    detail: "使用 Arclume 内置 Wine。已有 CrossOver 容器与文件保持原样。"
                 )
-                Button {
-                    chooseRuntime(.crossOver)
-                } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("使用 CrossOver")
-                            .fontWeight(.semibold)
-                        Text(OnlineGameRuntimeKind.crossOver.detail)
-                            .font(.footnote)
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
                 Button {
                     chooseRuntime(.bundledWine)
                 } label: {
@@ -599,7 +586,9 @@ struct OnlineGameSetupGuide: View {
         if targetRuntime == nil,
            chosenRuntime == nil,
            OnlineGameSetupStatus.isComplete(appGlobals: appGlobals) {
-            stage = .complete
+            // Already configured: a delayed presentation must not require
+            // acknowledging the completion screen again after switching mode.
+            isPresented = false
             return
         }
 

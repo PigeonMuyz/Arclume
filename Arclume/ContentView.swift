@@ -24,6 +24,7 @@ final class Router: ObservableObject {
 }
 
 struct ContentView: View {
+    @State private var compactHomeVisible = false
     @AppStorage("jx3CompactHome", store: UserDefaults(suiteName: suiteName))
     private var compactJX3Home = false
     @Environment(\.scenePhase) private var scenePhase
@@ -35,7 +36,7 @@ struct ContentView: View {
         cxAppPath: readUsrDefOptionString(key: "cxAppPath"),
     )
     @StateObject private var containerSteamStore = ContainerSteamStore()
-    @StateObject private var nativeSteamStore = NativeSteamStore()
+    @StateObject private var nativeSteamStore = ArclumeTestEnvironment.nativeSteamStore()
     @StateObject private var compatibilityStore = GameCompatibilityStore()
     @StateObject private var nativeRuntimeStore = NativeAppRuntimeStore()
 
@@ -52,6 +53,11 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut, value: router.route)
+        .onPreferenceChange(JX3CompactHomePreferenceKey.self) { compactHomeVisible = $0 }
+        .frame(
+            width: appWindowResizable ? nil : (compactHomeVisible ? 720 : windowWidth),
+            height: appWindowResizable ? nil : (compactHomeVisible ? 480 : windowHeight)
+        )
         .preferredColorScheme(.dark)
         .environmentObject(router)
         .environmentObject(modeStore)
@@ -67,8 +73,8 @@ struct ContentView: View {
                 } else {
                     LinearGradient(
                         colors: [
-                            .arclumeAccent.mix(with: .black, by: 0.2),
-                            .arclumeAccent.mix(with: .black, by: 0.4)
+                            .arclumeAccent.mix(with: .black, by: modeStore.selectedMode?.isOnlineGameMode == true ? 0.60 : 0.2),
+                            .arclumeAccent.mix(with: .black, by: modeStore.selectedMode?.isOnlineGameMode == true ? 0.78 : 0.4)
                         ],
                         startPoint: .top,
                         endPoint: .bottom
@@ -77,13 +83,15 @@ struct ContentView: View {
             }
         )
         .onAppear {
+            guard !ArclumeTestEnvironment.isTesting else { return }
             nativeRuntimeStore.reconcileRunningApplications()
         }
         .task {
+            guard !ArclumeTestEnvironment.isTesting else { return }
             await updateService.checkForUpdatesAtLaunch()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .active {
+            if newPhase == .active && !ArclumeTestEnvironment.isTesting {
                 nativeRuntimeStore.reconcileRunningApplications()
             }
         }
@@ -104,6 +112,15 @@ struct ContentView: View {
                 modeStore.select(mode)
             }
         }
+    }
+}
+
+/// Only a ready, embedded JX3 home may shrink the main window. Setup screens
+/// and standard-mode game sheets retain their original window dimensions.
+struct JX3CompactHomePreferenceKey: PreferenceKey {
+    static let defaultValue = false
+    static func reduce(value: inout Bool, nextValue: () -> Bool) {
+        value = value || nextValue()
     }
 }
 

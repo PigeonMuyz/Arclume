@@ -9,6 +9,7 @@ struct LibraryTitlebar: ToolbarContent {
     @ObservedObject var libraryPageGlobals: LibraryPageGlobals
     @EnvironmentObject private var appGlobals: AppGlobals
     @EnvironmentObject private var compatibilityStore: GameCompatibilityStore
+    @EnvironmentObject private var containerSteamStore: ContainerSteamStore
 
     var load: @Sendable () async -> Void
     let isOnlineMode: Bool
@@ -28,6 +29,22 @@ struct LibraryTitlebar: ToolbarContent {
             || libraryPageGlobals.jx3RuntimeActivity.state != .idle
     }
 
+    private var usesBundledWine: Bool {
+        isOnlineMode ? OnlineGameRuntimeKind.selected() == .bundledWine
+            : StandardGameRuntimeKind.selected() == .bundledWine
+    }
+
+    private var wineStopIcon: some View {
+        ZStack {
+            Image(systemName: "exclamationmark.octagon")
+                .opacity(libraryPageGlobals.isStoppingWine ? 0 : 1)
+            if libraryPageGlobals.isStoppingWine {
+                ProgressView().controlSize(.small)
+            }
+        }
+        .frame(width: 24, height: 24)
+    }
+
     var body: some ToolbarContent {
         if isOnlineMode {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -39,37 +56,19 @@ struct LibraryTitlebar: ToolbarContent {
                 .help("重新扫描剑网3")
 
                 Button {
-                    forceQuitOnlineGame()
+                    if usesBundledWine { stopBundledWine() }
+                    else { forceQuitOnlineGame() }
                 } label: {
-                    Image(systemName: onlineGameIsRunning ? "stop.fill" : "exclamationmark.octagon")
+                    if usesBundledWine || libraryPageGlobals.isStoppingWine { wineStopIcon }
+                    else { Image(systemName: onlineGameIsRunning ? "stop.fill" : "exclamationmark.octagon") }
                 }
+                .disabled(libraryPageGlobals.isStoppingWine)
                 .help(
-                    onlineGameIsRunning
+                    usesBundledWine ? "结束所有 Arclume Wine 进程" : onlineGameIsRunning
                         ? "停止当前 Games 容器中的剑网3启动器与游戏"
                         : "强制退出当前 Games 容器中的剑网3启动器与游戏"
                 )
-                .accessibilityLabel(onlineGameIsRunning ? "停止游戏" : "强制退出游戏")
-
-                if OnlineGameRuntimeKind.selected() == .crossOver,
-                   let cxPath = appGlobals.cxAppPath {
-                    Button {
-                        let configuration = NSWorkspace.OpenConfiguration()
-                        configuration.environment = [
-                            "CX_GRAPHICS_BACKEND": "d3dmetal",
-                            "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS": "0"
-                        ]
-                        NSWorkspace.shared.open(
-                            URL(fileURLWithPath: cxPath),
-                            configuration: configuration
-                        )
-                    } label: {
-                        Image("crossover-fill")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 24, height: 24)
-                    }
-                    .help("打开 CrossOver")
-                }
+                .accessibilityLabel(libraryPageGlobals.isStoppingWine ? "正在停止 Arclume Wine" : usesBundledWine ? "结束所有 Arclume Wine 进程" : onlineGameIsRunning ? "停止游戏" : "强制退出游戏")
 
                 if let bottleURL = OnlineGameDiscovery.selectedBottleURL(
                     from: appGlobals.selectedBottle
@@ -103,7 +102,7 @@ struct LibraryTitlebar: ToolbarContent {
                 Button {
                     libraryPageGlobals.showOptions = true
                 } label: {
-                    Label(L10n.string("Options"), systemImage: "gear")
+                    Label(L10n.string("Options"), systemImage: "gearshape")
                         .labelStyle(.iconOnly)
                 }
                 .help(L10n.string("Options"))
@@ -122,19 +121,46 @@ struct LibraryTitlebar: ToolbarContent {
             }
             ToolbarItem(placement: .secondaryAction) {
                 Button {
-                    Task {
+                    if usesBundledWine { stopBundledWine() }
+                    else { Task {
                         try? await closeWineActivities()
                         libraryPageGlobals.isLaunchingGame = false
-                    }
+                    } }
                 } label: {
-                    Image(systemName: "exclamationmark.octagon")
+                    wineStopIcon
                 }
-                .help(L10n.string("Stop CrossOver activities"))
+                .disabled(libraryPageGlobals.isStoppingWine)
+                .help(usesBundledWine ? "结束所有 Arclume Wine 进程" : L10n.string("Stop CrossOver activities"))
+                .accessibilityLabel(libraryPageGlobals.isStoppingWine ? "正在停止 Arclume Wine" : "结束 Wine 进程")
+                .accessibilityIdentifier("stop-wine-button")
             }
         }
         if !isOnlineMode {
             ToolbarItemGroup(placement: .secondaryAction) {
                 standardToolbarControls
+            }
+        }
+    }
+
+    @MainActor
+    private func stopBundledWine() {
+        guard !libraryPageGlobals.isStoppingWine else { return }
+        libraryPageGlobals.isStoppingWine = true
+        libraryPageGlobals.wineStopErrorMessage = nil
+        containerSteamStore.cancelPendingBundledWineLaunches()
+        let root = BundledWineRuntime.installationURL.deletingLastPathComponent()
+        Task {
+            defer { libraryPageGlobals.isStoppingWine = false }
+            do {
+                try await Task.detached(priority: .userInitiated) {
+                    try await ArclumeWineStopService.stop(runtimeRoot: root)
+                }.value
+                // Only report idle once kernel process enumeration confirms it.
+                libraryPageGlobals.isLaunchingGame = false
+                libraryPageGlobals.playingID = nil
+                libraryPageGlobals.jx3RuntimeActivity = .idle
+            } catch {
+                libraryPageGlobals.wineStopErrorMessage = error.localizedDescription
             }
         }
     }

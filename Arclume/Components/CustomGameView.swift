@@ -16,6 +16,7 @@ struct CustomGameView: View {
     @State private var isAutofilling: Bool = false
     @State private var isRefreshingAppStoreMetadata = false
     @State private var metadataRefreshMessage: String?
+    @State private var adaptationError: String?
     @State private var metadataImageAssets: [AppleAppStoreImageAsset] = []
     @State private var steamMetadataInput = ""
     @State private var steamMetadataFields = SteamMetadataField.defaultSelection
@@ -183,7 +184,7 @@ struct CustomGameView: View {
                     }
                 }
             }.frame(alignment: .top)
-            if game.isDirectNativeApplication {
+            if game.isCustom == true || game.isDirectNativeApplication {
                 SteamMetadataLinkEditor(
                     input: $steamMetadataInput,
                     selectedFields: $steamMetadataFields,
@@ -305,14 +306,17 @@ struct CustomGameView: View {
                 }
             }
             Group {
+                if let adaptationError { Text(adaptationError).font(.callout).foregroundStyle(.red) }
                 if id != "" {
                     ProminentButton(L10n.string("Update game"), systemImage: "arrow.2.circlepath") {
+                        guard validateAdaptation() else { return }
                         libraryPageGlobals.updateCustomAddedGames(gameData: game)
                         Task { await refreshNativeMetadataSources() }
                         isPresented = false
                     }
                 } else {
                     ProminentButton(L10n.string("Add game"), systemImage: "plus.circle") {
+                        guard validateAdaptation() else { return }
                         game.isCustom = true
                         libraryPageGlobals.customAddedGames.append(game)
                         libraryPageGlobals.saveCustomAddedGames()
@@ -340,6 +344,17 @@ struct CustomGameView: View {
         loadSteamMetadataLinkState()
     }
 
+    private func validateAdaptation() -> Bool {
+        adaptationError = nil
+        guard !game.isNative, let target = GameRemovalService.target(for: game),
+              let rule = GameAdaptationRules.matching(target) else { return true }
+        guard let bottle = game.installedBottleURL else {
+            adaptationError = "\(rule.name) 必须安装到 Arclume Wine 容器中的 \(rule.windowsDirectory)。"; return false
+        }
+        do { try GameAdaptationRules.validate(target, bottle: bottle); return true }
+        catch { adaptationError = error.localizedDescription; return false }
+    }
+
     private func configureGameApplication(_ url: URL) {
         metadataImageAssets = []
         metadataRefreshMessage = nil
@@ -349,6 +364,13 @@ struct CustomGameView: View {
             || url.pathExtension.caseInsensitiveCompare("exe") != .orderedSame
         game.appNames = nativeApplication?.processNames ?? [url.lastPathComponent]
         game.nativeAppBundleIdentifier = nativeApplication?.bundleIdentifier
+        if !game.isNative, let bottle = [BundledWineRuntime.standardSteamPrefixURL, BundledWineRuntime.prefixURL].first(where: {
+            url.standardizedFileURL.path.hasPrefix($0.appendingPathComponent("drive_c").standardizedFileURL.path + "/")
+        }) {
+            game.installedBottleURL = bottle
+            game.installedRuntimeKind = StandardGameRuntimeKind.bundledWine.rawValue
+            game.installedCrossOverPath = nil
+        }
 
         guard id.isEmpty else { return }
 

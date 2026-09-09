@@ -45,7 +45,7 @@ struct OptionsView: View {
     @AppStorage("appleAppStoreMetadataEnabled", store: UserDefaults(suiteName: suiteName))
     private var appleAppStoreMetadataEnabled = true
     @AppStorage(StandardGameRuntimeKind.defaultsKey, store: UserDefaults(suiteName: suiteName))
-    private var standardGameRuntimeRaw = StandardGameRuntimeKind.crossOver.rawValue
+    private var standardGameRuntimeRaw = StandardGameRuntimeKind.bundledWine.rawValue
 
     @EnvironmentObject private var appGlobals: AppGlobals
     @EnvironmentObject private var appSettings: AppSettings
@@ -60,7 +60,7 @@ struct OptionsView: View {
     }
 
     private var standardGameRuntime: StandardGameRuntimeKind {
-        StandardGameRuntimeKind(rawValue: standardGameRuntimeRaw) ?? .crossOver
+        .bundledWine
     }
 
     var body: some View {
@@ -73,6 +73,10 @@ struct OptionsView: View {
             settingsContent
         }
         .onAppear {
+            if let requestedPage = libraryPageGlobals.requestedSettingsPage {
+                selectedSettingsPage = requestedPage
+                libraryPageGlobals.requestedSettingsPage = nil
+            }
             if isOnlineMode {
                 OnlineGameRuntimeKind.migrateLegacyCrossOverConfigurationIfNeeded(
                     appGlobals: appGlobals
@@ -83,8 +87,6 @@ struct OptionsView: View {
             }
             if !isOnlineMode, standardGameRuntime == .bundledWine {
                 restoreBundledSteamPrefixIfAvailable()
-            } else {
-                restoreCrossOverSelection()
             }
         }
         .sheet(isPresented: $showNativeGameImport) {
@@ -93,6 +95,23 @@ struct OptionsView: View {
         }
         .sheet(isPresented: $showModeSelection) {
             ModeSelectionView(allowsCancel: true) { mode in
+                if mode != modeStore.selectedMode {
+                    if let current = OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle) {
+                        if isOnlineMode {
+                            OnlineGameRuntimeKind.recordBottle(current, for: .selected())
+                        } else {
+                            StandardGameRuntimeKind.recordBottle(current, for: .selected())
+                        }
+                    }
+                    let target = mode.isOnlineGameMode
+                        ? OnlineGameRuntimeKind.configuredBottleURL(for: .selected())
+                        : StandardGameRuntimeKind.configuredBottleURL(for: .selected())
+                    appGlobals.selectedBottle = target?.absoluteString ?? ""
+                    persistUsrDefOptionString(key: "selectedBottle", value: appGlobals.selectedBottle)
+                    containerSteamStore.refresh(bottleURL: mode.isOnlineGameMode ? nil : target)
+                    appGlobals.windowsSteamFolder = containerSteamStore.installation?.steamRootURL
+                    appGlobals.refreshSteamIdentity(containerInstallation: containerSteamStore.installation)
+                }
                 modeStore.select(mode)
                 showModeSelection = false
                 libraryPageGlobals.showOptions = false
@@ -169,7 +188,13 @@ struct OptionsView: View {
                         settingsCard { standardRuntimeSection }
                         if standardGameRuntime == .crossOver {
                             settingsCard { crossOverSection }
-                            settingsCard { steamBottleSection }
+                            settingsCard {
+                                steamBottleSection
+                                if !appGlobals.selectedBottle.isEmpty {
+                                    Divider()
+                                    steamInstallationSection
+                                }
+                            }
                             settingsCard { dependencySection }
                         } else {
                             settingsCard { bundledSteamPrefixSection }
@@ -181,6 +206,13 @@ struct OptionsView: View {
                         }
                         settingsCard { nativeGamesSection }
                         settingsCard { metadataSection }
+                        settingsCard {
+                            Button("恢复已隐藏游戏的自动识别") {
+                                UserDefaults(suiteName: suiteName)?.removeObject(forKey: "hiddenInstalledGames.v1")
+                                Task { await load() }
+                            }
+                            Text("不移动或删除文件，下次扫描将重新发现仍存在的游戏。").font(.footnote)
+                        }
                     case "更新":
                         updateCard
                     case "关于":
@@ -465,6 +497,7 @@ struct OptionsView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 12, content: content)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(14)
             .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
             .overlay {
@@ -486,18 +519,11 @@ struct OptionsView: View {
 
     private var standardRuntimeSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Windows 游戏运行时")
+            Text("运行时")
                 .font(.headline)
-            Picker("Windows 游戏运行时", selection: $standardGameRuntimeRaw) {
-                ForEach(StandardGameRuntimeKind.allCases) { runtime in
-                    Text(runtime.title).tag(runtime.rawValue)
-                }
-            }
-            .pickerStyle(.segmented)
-            .onChange(of: standardGameRuntimeRaw) { _, rawValue in
-                guard let runtime = StandardGameRuntimeKind(rawValue: rawValue) else { return }
-                switchStandardRuntime(to: runtime)
-            }
+            Text("Arclume Wine").font(.title3)
+            Text("统一使用内置 Wine。旧 CrossOver 容器保留，不会自动迁移或删除。")
+                .font(.footnote).foregroundStyle(.secondary)
         }
         .help(
             standardGameRuntime == .bundledWine
@@ -507,42 +533,29 @@ struct OptionsView: View {
     }
 
     private var bundledSteamPrefixSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Arclume Wine Steam 容器")
-                .font(.headline)
-            if BundledWineRuntime.isValidPrefix(at: BundledWineRuntime.standardSteamPrefixURL) {
-                Label("Steam 容器已就绪", systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
-                    .font(.footnote.weight(.medium))
-            } else {
-                Text("首次使用会解压内置 Wine，并创建独立的 64 位 Steam 容器。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Steam 容器").font(.headline)
+                Spacer()
+                Text("64 位").font(.caption).foregroundStyle(.secondary)
             }
-            Button(preparingBundledSteamPrefix ? "准备中…" : "准备 Steam 容器") {
-                prepareBundledSteamPrefix()
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(preparingBundledSteamPrefix)
-            if BundledWineRuntime.isValidPrefix(at: BundledWineRuntime.standardSteamPrefixURL) {
-                HStack {
-                    Button("安装 Steam…") { installSteamInBundledPrefix() }
-                        .help("选择 SteamSetup.exe 安装到此容器；安装完成后重新打开设置以扫描 Steam。")
-                    Button("打开 Steam") { containerSteamStore.openSteam(using: .bundledWine) }
-                        .disabled(!containerSteamStore.isReady)
-                }
-                .buttonStyle(.bordered)
-            }
-            if let bundledSteamProgress {
+            if preparingBundledSteamPrefix {
                 ProgressView(value: bundledSteamProgress) {
-                    Text(bundledSteamProgressLabel ?? "正在准备内置 Wine…")
-                        .font(.footnote)
+                    Text(bundledSteamProgressLabel ?? "正在准备容器…").font(.footnote)
                 }
-            }
-            if let error = containerSteamStore.errorMessage {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
+            } else if BundledWineRuntime.isValidPrefix(at: BundledWineRuntime.standardSteamPrefixURL) {
+                steamInstallationSection
+            } else {
+                HStack {
+                    Text("尚未创建").font(.subheadline).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("创建并安装 Steam") { prepareBundledSteamPrefix() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(containerSteamStore.steamSetupBusy)
+                }
+                if let error = containerSteamStore.errorMessage {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                }
             }
         }
     }
@@ -557,6 +570,7 @@ struct OptionsView: View {
             ) {
                 chooseCrossOver()
             }
+            .disabled(creatingBottle || containerSteamStore.steamSetupBusy)
             if downloading {
                 ProgressView(value: progress, total: 100) {
                     Text(progressLabel).font(.footnote)
@@ -592,6 +606,7 @@ struct OptionsView: View {
                         Text(label).tag(bottle.absoluteString)
                     }
                 }
+                .disabled(creatingBottle || containerSteamStore.steamSetupBusy)
                 .onChange(of: appGlobals.selectedBottle) { _, value in
                     selectStandardBottle(value)
                 }
@@ -602,6 +617,7 @@ struct OptionsView: View {
                 Button("新建") { createSelectedBottle() }
                     .disabled(
                         creatingBottle
+                            || containerSteamStore.steamSetupBusy
                             || appGlobals.cxAppPath == nil
                             || newBottleName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     )
@@ -897,7 +913,7 @@ struct OptionsView: View {
     }
 
     private func prepareBundledSteamPrefix() {
-        guard !preparingBundledSteamPrefix else { return }
+        guard !preparingBundledSteamPrefix, !containerSteamStore.steamSetupBusy else { return }
         preparingBundledSteamPrefix = true
         bundledSteamProgress = 0.01
         bundledSteamProgressLabel = "正在检查内置 Wine…"
@@ -915,12 +931,18 @@ struct OptionsView: View {
                         progress: reportProgress
                     )
                 }.value
+                guard !OnlineGameMode.isEnabled, standardGameRuntime == .bundledWine else {
+                    preparingBundledSteamPrefix = false
+                    return
+                }
                 StandardGameRuntimeKind.activate(
                     .bundledWine,
                     with: prefixURL,
                     appGlobals: appGlobals
                 )
                 syncStandardSteamState(for: prefixURL, loadAfterSync: true)
+                bundledSteamProgress = nil
+                beginSteamInstallation(in: prefixURL, using: .bundledWine)
             } catch {
                 containerSteamStore.errorMessage = error.localizedDescription
             }
@@ -928,34 +950,89 @@ struct OptionsView: View {
         }
     }
 
-    private func installSteamInBundledPrefix() {
-        let panel = NSOpenPanel()
-        panel.title = "选择 SteamSetup.exe"
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [
-            UTType(filenameExtension: "exe") ?? .data
-        ]
-        guard panel.runModal() == .OK, let installerURL = panel.url else { return }
-        guard BundledWineRuntime.isValidPrefix(at: BundledWineRuntime.standardSteamPrefixURL) else {
-            containerSteamStore.errorMessage = "请先准备 Arclume Wine Steam 容器。"
-            return
+    private var steamInstallationSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if containerSteamStore.steamSetupBusy {
+                ProgressView(value: containerSteamStore.steamSetupProgress) {
+                    Text(containerSteamStore.steamSetupMessage ?? "正在安装 Steam…")
+                        .font(.footnote)
+                }
+                if containerSteamStore.steamSetupDownloading {
+                    Button("取消下载", role: .cancel) { containerSteamStore.cancelSteamDownload() }
+                }
+            } else {
+                HStack {
+                    Label(
+                        containerSteamStore.isReady ? "Steam 已安装" : "待安装 Steam",
+                        systemImage: containerSteamStore.isReady ? "checkmark.circle.fill" : "arrow.down.circle"
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(containerSteamStore.isReady ? Color.green : Color.secondary)
+                    Spacer()
+                    if containerSteamStore.isReady {
+                        Button(containerSteamStore.steamOpening ? "准备 Steam…" : "打开 Steam") {
+                            if standardGameRuntime == .bundledWine {
+                                containerSteamStore.openSteam(using: .bundledWine)
+                            } else if let path = appGlobals.cxAppPath {
+                                containerSteamStore.openSteam(using: .crossOver(URL(fileURLWithPath: path)))
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    } else {
+                        Button("安装 Steam") { installSteamClient(manually: false) }
+                            .buttonStyle(.borderedProminent)
+                        Menu {
+                            Button("选择本地安装包…") { installSteamClient(manually: true) }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                        }
+                        .fixedSize()
+                        .accessibilityLabel("其他安装方式")
+                        .help("选择本地 SteamSetup.exe")
+                    }
+                }
+                .disabled(libraryPageGlobals.isStoppingWine || appGlobals.selectedBottle.isEmpty || creatingBottle || preparingBundledSteamPrefix || containerSteamStore.steamOpening)
+            }
+            SteamUpdateRecoveryControl()
+            if let error = containerSteamStore.steamSetupError {
+                Text(error).font(.footnote).foregroundStyle(.red)
+            }
+            if let error = containerSteamStore.errorMessage {
+                Text(error).font(.footnote).foregroundStyle(.red)
+            }
         }
-        do {
-            let configuration = try BundledWineRuntime.makeDefaultLaunchConfiguration()
-            var environment = configuration.environment
-            environment["WINEPREFIX"] = BundledWineRuntime.standardSteamPrefixURL.path
-            let process = Process()
-            process.executableURL = configuration.wineURL
-            process.arguments = [installerURL.path]
-            process.currentDirectoryURL = installerURL.deletingLastPathComponent()
-            process.environment = environment
-            process.standardInput = FileHandle.nullDevice
-            process.standardOutput = FileHandle.nullDevice
-            process.standardError = FileHandle.nullDevice
-            try process.run()
-        } catch {
-            containerSteamStore.errorMessage = error.localizedDescription
+    }
+
+    private func installSteamClient(manually: Bool) {
+        guard !containerSteamStore.steamSetupBusy,
+              let bottle = OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle) else { return }
+        let runtime: ContainerSteamRuntime
+        if standardGameRuntime == .bundledWine {
+            runtime = .bundledWine
+        } else if let path = appGlobals.cxAppPath {
+            runtime = .crossOver(URL(fileURLWithPath: path))
+        } else { return }
+        var installer: URL?
+        if manually {
+            let panel = NSOpenPanel()
+            panel.title = "选择 SteamSetup.exe"
+            panel.allowsMultipleSelection = false
+            panel.canChooseDirectories = false
+            panel.allowedContentTypes = [UTType(filenameExtension: "exe") ?? .data]
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            installer = url
+        }
+        beginSteamInstallation(in: bottle, using: runtime, installer: installer)
+    }
+
+    private func beginSteamInstallation(in bottle: URL, using runtime: ContainerSteamRuntime, installer: URL? = nil) {
+        containerSteamStore.installSteamClient(in: bottle, using: runtime, installerURL: installer) { completedBottle in
+            // The installer owns a captured container, even if settings close
+            // or the user switches launcher mode while it is running.
+            guard !OnlineGameMode.isEnabled,
+                  OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle)?.standardizedFileURL
+                    == completedBottle.standardizedFileURL else { return }
+            syncStandardSteamState(for: completedBottle, loadAfterSync: true)
         }
     }
 
@@ -1039,33 +1116,49 @@ struct OptionsView: View {
     }
 
     private func createSelectedBottle() {
-        guard !isOnlineMode, let crossOverPath = appGlobals.cxAppPath else { return }
+        guard !isOnlineMode, !creatingBottle, !containerSteamStore.steamSetupBusy,
+              let crossOverPath = appGlobals.cxAppPath else { return }
         let name = newBottleName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
-        creatingBottle = true
-        createBottleProcess = try? createBottle(cxAppPath: crossOverPath, bottleName: name)
-        createBottleProcess?.terminationHandler = { _ in
-            DispatchQueue.main.async {
-                creatingBottle = false
-                if let currentPath = appGlobals.cxAppPath {
-                    let appURL = URL(fileURLWithPath: currentPath)
-                    refreshBottles(at: appURL)
-                    if let created = bottles.first(where: {
-                        $0.lastPathComponent.caseInsensitiveCompare(name) == .orderedSame
-                    }) {
-                        appGlobals.selectedBottle = created.absoluteString
-                        persistUsrDefOptionString(key: "selectedBottle", value: created.absoluteString)
-                        if isOnlineMode {
-                            try? OnlineGameBottleConfiguration.apply(to: created)
-                            Task { await load() }
-                        } else {
-                            syncStandardSteamState(for: created, loadAfterSync: true)
-                        }
-                    }
-                }
-            }
+        guard !name.isEmpty, name != ".", name != "..", !name.contains("/"),
+              !bottles.contains(where: { $0.lastPathComponent.caseInsensitiveCompare(name) == .orderedSame })
+        else {
+            containerSteamStore.errorMessage = "请使用未被占用的有效容器名称。"
+            return
         }
-        if createBottleProcess == nil { creatingBottle = false }
+        creatingBottle = true
+        do {
+            let process = try createBottle(cxAppPath: crossOverPath, bottleName: name)
+            createBottleProcess = process
+            Task {
+                // createBottle starts the process before returning it. Polling
+                // also covers fast exits that could precede a handler being set.
+                while process.isRunning {
+                    try? await Task.sleep(for: .milliseconds(200))
+                }
+                creatingBottle = false
+                guard process.terminationReason == .exit, process.terminationStatus == 0 else {
+                    containerSteamStore.errorMessage = "创建 Steam 容器失败（\(process.terminationStatus)）。"
+                    return
+                }
+                guard !OnlineGameMode.isEnabled,
+                      standardGameRuntime == .crossOver,
+                      appGlobals.cxAppPath == crossOverPath else { return }
+                let appURL = URL(fileURLWithPath: crossOverPath)
+                refreshBottles(at: appURL)
+                guard let created = bottles.first(where: {
+                    $0.lastPathComponent.caseInsensitiveCompare(name) == .orderedSame
+                }) else {
+                    containerSteamStore.errorMessage = "创建后未找到 Steam 容器，请刷新重试。"
+                    return
+                }
+                StandardGameRuntimeKind.activate(.crossOver, with: created, appGlobals: appGlobals)
+                syncStandardSteamState(for: created, loadAfterSync: true)
+                beginSteamInstallation(in: created, using: .crossOver(appURL))
+            }
+        } catch {
+            creatingBottle = false
+            containerSteamStore.errorMessage = error.localizedDescription
+        }
     }
 
     private func importLauncher() {

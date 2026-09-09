@@ -74,7 +74,7 @@ struct GameOptionsView: View {
                         VStack(alignment: .trailing, spacing: 12) {
                             DropDown(
                                 options: OnlineGameMode.onlineGraphicsBackends,
-                                label: "图形后端",
+                                label: "D3DMetal 版本",
                                 value: $gameOptions.cxGraphicsBackend
                             )
                             .onChange(of: gameOptions.cxGraphicsBackend) { _, backend in
@@ -89,9 +89,9 @@ struct GameOptionsView: View {
                         Spacer()
 
                         VStack(alignment: .trailing, spacing: 12) {
-                            Toggle("Metal HUD", isOn: $gameOptions.mtlHudEnabled)
+                            Toggle(L10n.string("Metal HUD"), isOn: $gameOptions.mtlHudEnabled)
                             Toggle("MSync", isOn: $gameOptions.wineMSync)
-                            Toggle("DLSS FG 支持", isOn: $gameOptions.dlssFrameGenerationEnabled)
+                            Toggle(L10n.string("DLSS Frame Generation (Beta)"), isOn: $gameOptions.dlssFrameGenerationEnabled)
                                 .help("向客户端声明 DLSS 与帧生成能力（DLSS=2）；关闭时仅声明 DLSS 能力（DLSS=1）。实际开关仍需在游戏画质设置中选择。")
                             Toggle(
                                 "检测到游戏本体后关闭启动器",
@@ -157,12 +157,18 @@ struct GameOptionsView: View {
                 GroupBox("运行与图形") {
                     VStack(alignment: .leading, spacing: 12) {
                         if !game!.isNative {
-                            DropDown(options: cxGraphicsBackend,
-                                     label: L10n.string("Graphics Backend"),
-                                     value: $gameOptions.cxGraphicsBackend)
+                            DropDown(options: OnlineGameMode.onlineGraphicsBackends,
+                                     label: "D3DMetal 版本",
+                                     value: $gameOptions.cxGraphicsBackend,
+                                     controlIdentifier: "game-options-d3dmetal-version")
+                                .onChange(of: gameOptions.cxGraphicsBackend) { _, backend in
+                                    gameOptions.d3dMtl4Enabled = backend == "d3dmetal4"
+                                }
+                            Text("适用于 Direct3D 转译；Vulkan 游戏（如终末地）仍使用 Vulkan。")
+                                .font(.caption).foregroundStyle(.secondary)
                             Toggle("MSync", isOn: $gameOptions.wineMSync)
                         }
-                        Toggle("Metal HUD", isOn: $gameOptions.mtlHudEnabled)
+                        Toggle(L10n.string("Metal HUD"), isOn: $gameOptions.mtlHudEnabled)
                     }
                     .padding(8)
                 }
@@ -171,10 +177,6 @@ struct GameOptionsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Toggle(L10n.string("Advertise AVX"), isOn: $gameOptions.advertiseAVX)
                         if !game!.isNative {
-                            Toggle(L10n.string("Use DX9"), isOn: $gameOptions.dx9PatchEnabled)
-                                .onChange(of: gameOptions.dx9PatchEnabled) { _, enabled in
-                                    if enabled { gameOptions.cxGraphicsBackend = "wine" }
-                                }
                             Toggle(L10n.string("Enable SDL"), isOn: $gameOptions.enableSDL)
                             Toggle(L10n.string("Disable Hidraw"), isOn: $gameOptions.disableHidraw)
                             Divider()
@@ -239,10 +241,6 @@ struct GameOptionsView: View {
                 if gameOptions.cxGraphicsBackend == "d3dmetal4" {
                     Divider()
                     Section(L10n.string("D3DMetal Options")) {
-                        Toggle(L10n.string("Metal 4 Backend"), isOn: $gameOptions.d3dMtl4Enabled)
-                            .help(L10n.string("Uses the Metal 4 graphics backend when supported by CrossOver."))
-                            .disabled(OSVersion < 27)
-                            .opacity(ProcessInfo.processInfo.operatingSystemVersion.majorVersion < 27 ? 0.5 : 1.0)
                         VStack {
                             Text(L10n.format("Preferred maximum frame rate: %@", d3dMaxFPS))
                             Slider(
@@ -308,6 +306,11 @@ struct GameOptionsView: View {
         if let data: GameOptionsData = readUsrDefData(key: gameOptionsKey) {
             gameOptions.set(data: data)
         }
+        if game?.isNative == false {
+            gameOptions.cxGraphicsBackend = OnlineGameMode.resolvedGraphicsBackend(
+                gameOptions.cxGraphicsBackend, supportingD3DMetal4: OnlineGameMode.supportsD3DMetal4)
+            gameOptions.d3dMtl4Enabled = gameOptions.cxGraphicsBackend == "d3dmetal4"
+        }
         if isJX3Game {
             OnlineGameMode.applyDefaultRuntimePreferences(to: gameOptions)
         }
@@ -321,7 +324,9 @@ struct GameOptionsView: View {
     }
 
     private var selectedBottleURL: URL? {
-        OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle)
+        isJX3Game
+            ? OnlineGameMode.jx3BottleURL(appGlobals: appGlobals)
+            : OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle)
     }
 
     private func chooseJX3Preset() {

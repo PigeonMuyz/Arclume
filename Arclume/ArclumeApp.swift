@@ -31,17 +31,18 @@ struct ArclumeApp: App {
     @StateObject private var updateService: ArclumeUpdateService
 
     init() {
-        migrateLegacyProcyonDataIfNeeded()
-        migrateLegacyDefaultsIfNeeded()
-        migrateUnavailableConfiguredMetadataSourceIfNeeded()
+        if !ArclumeTestEnvironment.isTesting {
+            migrateLegacyProcyonDataIfNeeded()
+            migrateLegacyDefaultsIfNeeded()
+            migrateUnavailableConfiguredMetadataSourceIfNeeded()
+        }
         _appSettings = StateObject(wrappedValue: AppSettings())
         _updateService = StateObject(wrappedValue: ArclumeUpdateService())
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .frame(width: appWindowResizable ? nil : windowWidth, height: appWindowResizable ? nil : windowHeight)
+            appContent
                 .environment(\.locale, appSettings.language.locale)
                 .environmentObject(appSettings)
                 .environmentObject(updateService)
@@ -61,5 +62,19 @@ struct ArclumeApp: App {
             CommandGroup(replacing: .newItem) { } // replaces "New Window" with nothing
         }
     }
-    
+    @ViewBuilder
+    private var appContent: some View {
+        #if DEBUG
+        if ArclumeTestEnvironment.isUIFixture {
+            ArclumeUITestRootView()
+        } else if ArclumeTestEnvironment.isTesting {
+            Text("Arclume Core Tests")
+        } else {
+            ContentView()
+        }
+        #else
+        ContentView()
+        #endif
+    }
+
 }

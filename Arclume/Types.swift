@@ -368,11 +368,16 @@ struct Game: Identifiable, Codable {
     var isInstalled: Bool
     var appNames: [String] = []
     var appExeURL: URL?
+    var installedBottleURL: URL?
+    var installedRuntimeKind: String?
+    var installedCrossOverPath: String?
     var isCustom: Bool?
     var isNativeAppImport: Bool?
     var nativeAppBundleIdentifier: String?
     var appStoreMetadataLanguage: String?
     var steamMetadataLink: SteamMetadataLink?
+    var gameDBLink: GameDBLink?
+    var gameDBAutoDisabled: Bool?
     var isFromNativeSteamLibrary: Bool?
     
     // taken from SteamGame
@@ -433,6 +438,11 @@ struct Game: Identifiable, Codable {
         case isInstalled = "is_installed"
         case appNames = "app_names"
         case appExeURL = "app_exe_url"
+        case gameDBLink
+        case gameDBAutoDisabled
+        case installedBottleURL = "installed_bottle_url"
+        case installedRuntimeKind = "installed_runtime_kind"
+        case installedCrossOverPath = "installed_crossover_path"
         case isCustom = "is_custom"
         case isNativeAppImport = "is_native_app_import"
         case nativeAppBundleIdentifier = "native_app_bundle_identifier"
@@ -803,13 +813,17 @@ class LibraryPageGlobals: ObservableObject {
     @Published var gamesMeta: [GamesMeta] = []
     @Published var folders: [String] = []
     @Published var showOptions: Bool = false
+    @Published var requestedSettingsPage: String?
     @Published var showTools: Bool = false
     @Published var filter: String = ""
     @Published var showDetailView = false
     @Published var selectedGame: Game? = nil
     @Published var showCustomGameEditor = false
+    @Published var showWindowsInstaller = false
     @Published var editingCustomGameID: String?
     @Published var isLaunchingGame: Bool = false
+    @Published var isStoppingWine: Bool = false
+    @Published var wineStopErrorMessage: String?
     @Published var launchErrorMessage: String?
     @Published var customAddedGames: [Game] = []
     @Published var games: [Game] = []
@@ -932,13 +946,40 @@ class LibraryPageGlobals: ObservableObject {
         guard let link = game.steamMetadataLink,
               let metadata = linkedSteamMetadata[game.id]
         else {
-            return game
+            return GameDBMetadataResolver.resolve(game)
         }
-        return SteamMetadataResolver.resolvedGame(
+        return GameDBMetadataResolver.resolve(SteamMetadataResolver.resolvedGame(
             base: game,
             metadata: metadata,
             link: link
-        )
+        ))
+    }
+
+    func setGameDBMetadata(_ metadata: GameDBMetadata?, for id: String) {
+        guard let index = customAddedGames.firstIndex(where: { $0.id == id }) else { return }
+        customAddedGames[index].gameDBLink = metadata.map { GameDBLink(metadata: $0, fetchedAt: Date()) }
+        customAddedGames[index].gameDBAutoDisabled = metadata == nil
+        saveCustomAddedGames()
+    }
+
+    func refreshGameDBMetadata() async {
+        let snapshot = customAddedGames
+        for game in snapshot {
+            guard !Task.isCancelled else { return }
+            guard game.gameDBAutoDisabled != true else { continue }
+            let oldID = game.gameDBLink?.metadata.id
+            if let link = game.gameDBLink, Date().timeIntervalSince(link.fetchedAt) < 7 * 86400 { continue }
+            // Only a verified local identity is auto-linked. Other games use the search sheet.
+            let id = oldID ?? game.appExeURL.flatMap { GameAdaptationRules.matching($0)?.gameDBID }
+            guard let id else { continue }
+            do {
+                let metadata = try await GameDBMetadataService.shared.details(id: id)
+                guard !Task.isCancelled, let current = customAddedGames.first(where: { $0.id == game.id }),
+                      current.gameDBAutoDisabled != true,
+                      current.gameDBLink?.metadata.id == oldID else { continue }
+                setGameDBMetadata(metadata, for: game.id)
+            } catch { console.warn("GameDB metadata unavailable; keeping cached/local data") }
+        }
     }
     
     func saveCustomAddedGames() {
@@ -946,6 +987,41 @@ class LibraryPageGlobals: ObservableObject {
         let encoder = JSONEncoder()
         guard let data = try? encoder.encode(self.customAddedGames) else { return }
         groupDefaults.set(data, forKey: "customAddedGames")
+    }
+
+    func addInstalledProgram(_ candidate: InstalledProgramCandidate, bottle: URL,
+                             runtimeKind: String, crossOverPath: String?, userInitiated: Bool = false) {
+        guard (try? GameAdaptationRules.validate(candidate.executable, bottle: bottle)) != nil else { return }
+        // Verified games launch their EXE, not an intermediate launcher shortcut.
+        let entry = runtimeKind == StandardGameRuntimeKind.bundledWine.rawValue
+            && WindowsGameLaunchRules.isEndfield(candidate.executable)
+            ? candidate.executable : candidate.entry
+        let defaults = UserDefaults(suiteName: suiteName)
+        let identity = GameRemovalService.identity(executable: entry, bottle: bottle)
+        let hidden = defaults?.stringArray(forKey: "hiddenInstalledGames.v1") ?? []
+        if userInitiated {
+            // Explicit reinstallation may restore a previously hidden entry; scans still respect hiding.
+            defaults?.set(hidden.filter { $0 != identity }, forKey: "hiddenInstalledGames.v1")
+        } else if hidden.contains(identity) { return }
+        guard !customAddedGames.contains(where: {
+            $0.appExeURL?.standardizedFileURL.resolvingSymlinksInPath() == entry.standardizedFileURL.resolvingSymlinksInPath()
+                && $0.installedBottleURL?.standardizedFileURL == bottle.standardizedFileURL
+        }) else { return }
+        var game = Game.emptyGame
+        game.id = UUID().uuidString
+        game.name = candidate.name
+        game.isCustom = true
+        game.isNative = false
+        game.isInstalled = true
+        game.downloadProgress = 100
+        game.platforms = Platforms(windows: true, mac: false, linux: false)
+        game.appExeURL = entry
+        game.appNames = [candidate.executable.lastPathComponent]
+        game.installedBottleURL = bottle
+        game.installedRuntimeKind = runtimeKind
+        game.installedCrossOverPath = runtimeKind == StandardGameRuntimeKind.crossOver.rawValue ? crossOverPath : nil
+        customAddedGames.append(game)
+        saveCustomAddedGames()
     }
     
     func updateCustomAddedGames(gameData: Game) {
@@ -1048,7 +1124,7 @@ class LibraryPageGlobals: ObservableObject {
 
     func refreshNativeSteamMetadata(forceRefresh: Bool = false) async {
         let linkedGames = customAddedGames.filter {
-            $0.isDirectNativeApplication && $0.steamMetadataLink != nil
+            $0.steamMetadataLink != nil
         }
         let linkedGameIDs = Set(linkedGames.map(\.id))
         var refreshedMetadata = linkedSteamMetadata.filter {
@@ -1157,6 +1233,12 @@ class LibraryPageGlobals: ObservableObject {
     }
     
     func deleteCustomAddedGame(game: Game) {
+        if let executable = GameRemovalService.target(for: game) ?? game.appExeURL {
+            let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+            var hidden = Set(defaults.stringArray(forKey: "hiddenInstalledGames.v1") ?? [])
+            hidden.insert(GameRemovalService.identity(executable: executable, bottle: game.installedBottleURL))
+            defaults.set(hidden.sorted(), forKey: "hiddenInstalledGames.v1")
+        }
         self.customAddedGames.removeAll { $0.id == game.id }
         if selectedGame?.id == game.id {
             selectedGame = nil
@@ -1197,7 +1279,12 @@ final class AppGlobals: ObservableObject {
     }
     
     init(selectedBottle: String? = "", cxAppPath: String? = nil) {
-        self.selectedBottle = readUsrDefOptionString(key: "selectedBottle") ?? ""
+        let stored = readUsrDefOptionString(key: "selectedBottle") ?? ""
+        // Hosted tests and UI fixtures must not migrate real preferences.
+        self.selectedBottle = ArclumeTestEnvironment.isTesting ? stored : BundledRuntimePolicy.adopt(
+            defaults: UserDefaults(suiteName: suiteName) ?? .standard,
+            selectedBottle: stored,
+            online: OnlineGameMode.isEnabled)
         self.cxAppPath = readUsrDefOptionString(key: "cxAppPath")
     }
 

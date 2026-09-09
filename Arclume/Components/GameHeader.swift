@@ -73,7 +73,8 @@ struct GameHeader: View {
                             forceQuitJX3Game()
                         } else {
                             Task {
-                                try! await closeWineActivities()
+                                do { try await closeWineActivities() }
+                                catch { libraryPageGlobals.wineStopErrorMessage = error.localizedDescription }
                                 libraryPageGlobals.playingID = nil
                             }
                         }
@@ -172,7 +173,7 @@ struct GameHeader: View {
     
     @MainActor
     func playGame() {
-        guard !isPlaying else { return }
+        guard !isPlaying, !libraryPageGlobals.isStoppingWine else { return }
         libraryPageGlobals.setLoader(state: true)
         Task {
             do {
@@ -181,14 +182,9 @@ struct GameHeader: View {
                 if let data: GameOptionsData = readUsrDefData(key: gameOptKey) {
                     gameOptions.set(data: data)
                 }
-                if game!.usesCrossOverRuntime {
-                    compatibilityStore.applyRuntimePreferences(for: game!, to: gameOptions)
-                }
-                if OnlineGameMode.isEnabled, game!.id == OnlineGameMode.jx3GameID {
+                if OnlineGameMode.isJX3(game!) {
                     OnlineGameMode.applyDefaultRuntimePreferences(to: gameOptions)
-                    guard let bottleURL = OnlineGameDiscovery.selectedBottleURL(
-                        from: appGlobals.selectedBottle
-                    ) else {
+                    guard let bottleURL = OnlineGameMode.jx3BottleURL(appGlobals: appGlobals) else {
                         throw CocoaError(.fileNoSuchFile)
                     }
                     let crossOverPath = appGlobals.cxAppPath
@@ -261,7 +257,7 @@ struct GameHeader: View {
                 } else {
                     Task(priority: .background) {
                         do {
-                            tObserver = try await getGameTracker(appNames: game!.appNames, cxAppPath: appGlobals.cxAppPath, bottleName: appGlobals.selectedBottle, onLoad: {
+                            tObserver = try await getGameTracker(appNames: game!.appNames, cxAppPath: game!.installedCrossOverPath ?? appGlobals.cxAppPath, bottleName: game!.installedBottleURL?.absoluteString ?? appGlobals.selectedBottle, onLoad: {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                                     libraryPageGlobals.setLoader(state: false)
                                 }
@@ -271,6 +267,7 @@ struct GameHeader: View {
                                 libraryPageGlobals.playingID = nil
                                 tObserver = nil
                             }, isNative: game!.isNative,
+                            stopSteamOnTermination: game!.installedBottleURL == nil,
                             steamAppID: game!.isCustom == true ? nil : game!.steamAppID,
                             steamRootURL: appGlobals.windowsSteamFolder)
                         } catch {
@@ -284,7 +281,7 @@ struct GameHeader: View {
                         return
                     }
                     let steamExePath = appGlobals.windowsSteamFolder?.appendingPathComponent("Steam.exe").path(percentEncoded: false) ?? "C:\\Program Files (x86)\\Steam\\Steam.exe"
-                    try await launchWindowsGame(id: String(game!.steamAppID), cxAppPath: appGlobals.cxAppPath, selectedBottle: appGlobals.selectedBottle, steamExePath: steamExePath, options: gameOptions, appExeURL: game!.appExeURL)
+                    try await launchWindowsGame(id: String(game!.steamAppID), cxAppPath: game!.installedCrossOverPath ?? appGlobals.cxAppPath, selectedBottle: game!.installedBottleURL?.absoluteString ?? appGlobals.selectedBottle, steamExePath: steamExePath, options: gameOptions, appExeURL: game!.appExeURL, installedRuntimeKind: game!.installedRuntimeKind)
                 }
             } catch {
                 libraryPageGlobals.setLoader(state: false)
@@ -299,9 +296,7 @@ struct GameHeader: View {
 
     @MainActor
     private func forceQuitJX3Game() {
-        guard let bottleURL = OnlineGameDiscovery.selectedBottleURL(
-            from: appGlobals.selectedBottle
-        ) else {
+        guard let bottleURL = OnlineGameMode.jx3BottleURL(appGlobals: appGlobals) else {
             return
         }
         libraryPageGlobals.playingID = nil

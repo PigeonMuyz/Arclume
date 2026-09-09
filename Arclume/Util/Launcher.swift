@@ -8,6 +8,16 @@
 import AppKit
 
 func closeWineActivities() async throws {
+    if StandardGameRuntimeKind.selected() == .bundledWine {
+        // Game termination observers can run while the toolbar stop is draining.
+        // They must not fall through to the legacy global CrossOver sweep.
+        guard !ArclumeWineStopService.isStopping else { return }
+        let root = BundledWineRuntime.installationURL.deletingLastPathComponent()
+        try await Task.detached(priority: .userInitiated) {
+            try await ArclumeWineStopService.stop(runtimeRoot: root)
+        }.value
+        return
+    }
     // Wait for graceful termination, then escalate to forceTerminate, then give a final wait
     let gracePeriod: UInt64 = 2_000_000_000 // 2 seconds in nanoseconds
     let pollInterval: UInt64 = 200_000_000  // 0.2 seconds in nanoseconds
@@ -117,6 +127,7 @@ func quitSteam(cxAppPath: String, bottleName: String, isNative: Bool) async thro
         if StandardGameRuntimeKind.selected() == .bundledWine,
            let bottleURL = OnlineGameDiscovery.selectedBottleURL(from: bottleName)
         {
+            guard !ArclumeWineStopService.isStopping else { return }
             let configuration = try BundledWineRuntime.makeDefaultLaunchConfiguration()
             var environment = configuration.environment
             environment["WINEPREFIX"] = bottleURL.path
@@ -200,14 +211,33 @@ private func applyWindowsInputOptions(to bottleURL: URL, options: GameOptions) t
     try registry.save()
 }
 
-func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, steamExePath: String, options: GameOptions? = nil, appExeURL: URL? = nil) async throws -> Void {
+func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, steamExePath: String, options: GameOptions? = nil, appExeURL: URL? = nil, installedRuntimeKind: String? = nil) async throws -> Void {
     console.log("options: \(options.debugDescription)")
     guard let options else { throw CocoaError(.fileNoSuchFile) }
     guard let bottleURL = OnlineGameDiscovery.selectedBottleURL(from: selectedBottle) else {
         throw CocoaError(.fileNoSuchFile)
     }
-    if StandardGameRuntimeKind.selected() == .bundledWine {
-        guard BundledWineRuntime.ownsStandardSteamPrefix(bottleURL),
+    guard installedRuntimeKind != StandardGameRuntimeKind.crossOver.rawValue,
+          BundledWineRuntime.ownsStandardSteamPrefix(bottleURL) || BundledWineRuntime.ownsPrefix(bottleURL) else {
+        throw NSError(domain: "Arclume.Runtime", code: 1,
+            userInfo: [NSLocalizedDescriptionKey: BundledRuntimePolicy.retiredMessage])
+    }
+    if let appExeURL {
+        var entry = Game.emptyGame
+        entry.appExeURL = appExeURL
+        entry.installedBottleURL = bottleURL
+        guard let resolved = GameRemovalService.target(for: entry) else { throw GameRemovalError.unsafePath }
+        try GameAdaptationRules.validate(resolved, bottle: bottleURL)
+        let root = bottleURL.appendingPathComponent("drive_c").standardizedFileURL.resolvingSymlinksInPath()
+        guard appExeURL.standardizedFileURL.resolvingSymlinksInPath().path.hasPrefix(root.path + "/") else {
+            throw NSError(domain: "Arclume.Runtime", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: BundledRuntimePolicy.retiredMessage])
+        }
+    }
+    if (installedRuntimeKind.flatMap(StandardGameRuntimeKind.init(rawValue:)) ?? StandardGameRuntimeKind.selected()) == .bundledWine {
+        let launchTicket = try ArclumeWineStopService.launchTicket()
+        guard (BundledWineRuntime.ownsStandardSteamPrefix(bottleURL)
+               || (appExeURL != nil && BundledWineRuntime.ownsPrefix(bottleURL))),
               BundledWineRuntime.isValidPrefix(at: bottleURL)
         else {
             throw BundledWineRuntimeError.invalidPrefix
@@ -216,17 +246,21 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
         let configuration = try BundledWineRuntime.makeLaunchConfiguration(options: options)
         var environment = configuration.environment
         environment["WINEPREFIX"] = bottleURL.path
+        environment = GameAdaptationRules.processEnvironment(environment, executable: appExeURL, bottle: bottleURL)
         let steamBootOptions = [
             "-nochatui", "-nofriendsui", "-silent", "-no-browser",
             "-no-cef-sandbox", "-skipinitialbootstrap"
         ]
-        let extraArguments = options.gameArguments.split(
+        var extraArguments = options.gameArguments.split(
             whereSeparator: { $0.isWhitespace }
         ).map(String.init)
+        if let appExeURL {
+            extraArguments = WindowsGameLaunchRules.arguments(for: appExeURL, userArguments: extraArguments)
+        }
         let target = appExeURL?.path(percentEncoded: false) ?? steamExePath
         let arguments = appExeURL == nil
             ? [target] + steamBootOptions + ["-applaunch", id] + extraArguments
-            : [target] + extraArguments
+            : (appExeURL?.pathExtension.lowercased() == "lnk" ? ["start.exe", "/unix", target] : [target]) + extraArguments
         let process = Process()
         process.executableURL = configuration.wineURL
         process.arguments = arguments
@@ -236,7 +270,10 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
+        let diagnostic = try WindowsProgramDiagnosticLog.configure(process, executable: appExeURL, bottle: bottleURL, environment: &environment)
+        process.environment = environment
+        do { try ArclumeWineStopService.withLaunchTicket(launchTicket) { try process.run() } }
+        catch { diagnostic?.finish(); throw error }
         return
     }
     guard let cxAppPath else { throw CocoaError(.fileNoSuchFile) }
@@ -256,7 +293,9 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
     
 //    try cpyd8d9DLLs(to: bottleURL, enable: options!.dx9PatchEnabled)
     
-    let gameLaunchCommand = appExeURL != nil ? "\"\(appExeURL!.path(percentEncoded: false))\"" : "\"\(steamExePath)\" \(steamBootOptions) -applaunch \(String(id))"
+    let shortcutPrefix = appExeURL?.pathExtension.lowercased() == "lnk" ? "start.exe /unix " : ""
+    func shellQuoted(_ value: String) -> String { "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+    let gameLaunchCommand = appExeURL != nil ? shortcutPrefix + shellQuoted(appExeURL!.path(percentEncoded: false)) : "\"\(steamExePath)\" \(steamBootOptions) -applaunch \(String(id))"
     let cxAppURL = URL(fileURLWithPath: cxAppPath)
     switch options.cxGraphicsBackend {
         case "d3dmetal4":
@@ -267,7 +306,7 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
             try  installd3dMetal(at: cxAppURL, version: "3")
     }
     
-    command = "env \(getInlineEnvs(from: options) + wineEnvs) \(cxAppPath)/Contents/SharedSupport/CrossOver/bin/wine --bottle \(bottleName) \(gameLaunchCommand) \(arguments)"
+    command = "env \(getInlineEnvs(from: options) + wineEnvs) \(shellQuoted(cxAppPath + "/Contents/SharedSupport/CrossOver/bin/wine")) --bottle \(shellQuoted(bottleName)) \(gameLaunchCommand) \(arguments)"
     
     #if DEBUG
     console.log(command)

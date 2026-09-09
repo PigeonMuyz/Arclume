@@ -27,7 +27,7 @@ enum ArclumeMode: String, CaseIterable, Hashable, Identifiable, Sendable {
     var subtitle: String {
         switch self {
         case .standard:
-            "Steam + 自定义游戏"
+            "Steam + 网游 + 自定义游戏"
         case .jx3:
             "SeasunGame / 剑网3"
         }
@@ -36,7 +36,7 @@ enum ArclumeMode: String, CaseIterable, Hashable, Identifiable, Sendable {
     var description: String {
         switch self {
         case .standard:
-            "扫描 Steam 游戏库，也可以添加自定义游戏。"
+            "扫描 Steam 游戏库和已配置的剑三，也可以添加自定义游戏。"
         case .jx3:
             "只扫描 SeasunGame，只识别 SeasunGame 启动器和剑网3。"
         }

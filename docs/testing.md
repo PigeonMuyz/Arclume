@@ -2,27 +2,46 @@
 
 ## 现状
 
-`ArclumeTests/` 已覆盖解析、迁移、Bottle、Runtime 验证、Steam 发现和进程监控等核心逻辑，主要使用 Swift Testing。`ArclumeUITests/` 与 `ArclumeUITestsLaunchTests.swift` 使用 XCTest / XCUITest，依赖 macOS 桌面自动化和 App 激活。
+`ArclumeTests/` 覆盖解析、迁移、Bottle、Runtime 验证、Steam 发现、适配规则和安全清理，主要使用 Swift Testing。`ArclumeUITests/` 使用 XCTest / XCUITest，依赖 macOS 桌面自动化和 App 激活。旧截图启动模板已移除。
 
-因此，笼统执行 `xcodebuild test` 会同时拉起 UI 测试；在无交互授权、远程桌面或 CI 环境中，它可能因测试 Runner 初始化而失败。这类失败首先应归类为环境/授权问题，不应直接归因于产品逻辑。
+共享 `Arclume` Scheme 默认选择 `ArclumeCore.xctestplan`，不会同时拉起 UI 测试。`ArclumeUI.xctestplan` 需要显式选择；桌面 Runner/授权失败先归类为环境问题。
+
+## 当前入口（2026-09-09）
+
+```bash
+# 核心测试；日常仍建议加 -only-testing 选择本次影响的类
+xcodebuild test -project Arclume.xcodeproj -scheme Arclume -testPlan ArclumeCore -destination 'platform=macOS'
+
+# 只编译 UI 测试，不启动桌面自动化
+xcodebuild build-for-testing -project Arclume.xcodeproj -scheme Arclume -testPlan ArclumeUI -destination 'platform=macOS'
+
+# 显式选择的 UI 验证，需桌面 Runner 权限
+xcodebuild test -project Arclume.xcodeproj -scheme Arclume -testPlan ArclumeUI -destination 'platform=macOS'
+```
+
+- 核心测试宿主不加载真实 ContentView，不执行启动迁移；偏好使用独立 UUID suite。测试临时文件继续由各 fixture 清理。
+- UI 用例统一设置 `ARCLUME_UI_TEST_FIXTURE=1` 和 UUID `ARCLUME_TEST_RUN_ID`；每次测试后退出 App 并清理该 UUID 偏好域。环境变量仅在 Debug 生效。
+- 模式页和图形设置复用生产视图；库场景使用无远程图片的固定数据及拒绝安装的 Steam stub。关闭更新检查、真实库扫描和启动时用户目录创建。
+- 已替换空 example、截图启动模板和未隔离性能测试。现有带 Procyon 迁移输入的核心测试应保留。
+- UI 用例不点击游戏启动、安装、Wine 终止或真实清理按钮；有损行为只允许另外明确选择的隔离 fixture 验证。
 
 ## 目标分层
 
 | 层级 | 范围 | 运行位置 | PR 默认状态 |
 | --- | --- | --- | --- |
 | B0：静态与构建 | 差异、Manifest、LFS、Debug build | 本地与 CI | 必须 |
-| T1：核心测试 | `ArclumeTests` | 本地与 CI | 规划为必须 |
+| T1：核心测试 | `ArclumeCore.xctestplan` | 本地；CI 尚待接入 | 按影响范围选择 |
 | T2：UI XCTest | `ArclumeUITests` + fixture | 有交互桌面会话 | 显式选择 |
 | T3：Runtime / 游戏 | Wine、Games、SeasunGame、JX3ClientX64 | 真机手工验证 | 按影响范围 |
 
-当前只执行 B0。T1 和 T2 在新 Test Plan 完成前不自动接入 PR workflow。
+默认 PR workflow 仍只执行 B0；新 Test Plan 不改变 CI 发布或自动运行范围。
 
-## 新 Test Plan 的实施计划
+## 后续计划
 
-### Phase 1：隔离核心测试
+### Phase 1：扩大核心隔离审计（入口已实现）
 
-1. 新建共享 `Arclume.xctestplan`，将 `ArclumeTests` 命名为 **Core Tests**。
-2. 在该 Plan 中禁用 `ArclumeUITests`，并使用独立 `derivedDataPath`、测试环境和临时目录。
+1. 已提供独立 Core/UI Plan，持续检查后续测试是否遵守隔离边界。
+2. 核心 Plan 不包含 UI 目标；使用独立 `derivedDataPath`、测试环境和临时目录。
 3. 为 `ArclumeTests` 补充测试前后清理规则，确认不读取真实 App Support、Steam、Bottle 或游戏目录。
 4. 在本机用最小命令验证：
 
@@ -35,7 +54,7 @@
 
 ### Phase 2：建立 UI XCTest 基线
 
-1. 删除 `testExample()` 这类无断言测试，并将启动性能测试从功能 PR 中分离。
+1. 已替换无断言模板；将来增加性能测试时继续与功能 PR 分离。
 2. 所有 UI 测试必须显式设定 `ARCLUME_UI_TEST_FIXTURE=1`，不得访问真实用户数据。
 3. 使用固定窗口尺寸、稳定 accessibility identifier 和截图/附件产物。
 4. 将 UI XCTest 放入独立的手动 workflow 或夜间 workflow；只有在已验证的 GUI Runner 上才考虑 PR 门槛。

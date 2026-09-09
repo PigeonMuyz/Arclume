@@ -7,7 +7,8 @@
 
 import Foundation
 
-nonisolated let suiteName = "group.io.github.pigeonmuyz.arclume"
+nonisolated let suiteName = ArclumeTestEnvironment.isTesting
+    ? ArclumeTestEnvironment.defaultsSuite : "group.io.github.pigeonmuyz.arclume"
 private let legacyProcyonSuiteName = "group.io.github.pigeonmuyz.procyonplus"
 private let legacyCodexForkSuiteName = "group.com.codex.procyonfork"
 private let legacyMigrationKey = "didMigrateArclumeDefaults.v1"

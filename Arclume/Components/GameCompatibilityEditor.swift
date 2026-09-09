@@ -22,19 +22,16 @@ struct GameCompatibilityEditor: View {
                         .foregroundStyle(.secondary)
                 }
 
-                Picker(L10n.string("CrossOver"), selection: crossOverStatus) {
+                if BundledRuntimePolicy.needsReconfiguration(game) {
+                    Text(BundledRuntimePolicy.retiredMessage).font(.footnote).foregroundStyle(.orange)
+                }
+                Picker("Wine 兼容性标记", selection: crossOverStatus) {
                     ForEach(CrossOverCompatibility.allCases) { status in
                         Text(status.title).tag(status)
                     }
                 }
                 .pickerStyle(.menu)
                 .accessibilityIdentifier("gameCompatibility.crossOverPicker")
-
-                Toggle(L10n.string("GPTK 4 (Beta 2)"), isOn: gptk4BetaEnabled)
-                    .toggleStyle(.switch)
-                    .disabled(OSVersion < 27)
-                    .help(L10n.string("Requires macOS 27 or later"))
-                    .accessibilityIdentifier("gameCompatibility.gptk4Toggle")
 
                 if crossOverStatus.wrappedValue == .supported {
                     CrossOverMacRequirementsEditor(game: game)
@@ -55,16 +52,6 @@ struct GameCompatibilityEditor: View {
         )
     }
 
-    private var gptk4BetaEnabled: Binding<Bool> {
-        Binding(
-            get: {
-                compatibilityStore.profile(for: game).gptk4BetaEnabled
-            },
-            set: { isEnabled in
-                compatibilityStore.setGPTK4BetaEnabled(isEnabled, for: game)
-            }
-        )
-    }
 }
 
 private struct CrossOverMacRequirementsEditor: View {
@@ -79,7 +66,7 @@ private struct CrossOverMacRequirementsEditor: View {
         VStack(alignment: .leading, spacing: 8) {
             Divider()
 
-            Text(L10n.string("CrossOver macOS Requirements"))
+            Text("Wine 的 macOS 要求")
                 .font(.subheadline.weight(.semibold))
 
             requirementEditor(

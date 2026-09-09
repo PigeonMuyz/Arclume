@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "processNames": [{"executable": "YY.exe", "name": "YY语音", "ruleID": "yyspeak-portable"}],
+  "rules": [{
+    "id": "yyspeak-portable",
+    "name": "YY语音",
+    "kind": "application",
+    "installDirectory": "PortableApps/YYSpeak",
+    "executable": "YY.exe",
+    "alternateExecutables": [],
+    "requiredFiles": ["yylauncher.exe"],
+    "defaultArguments": [],
+    "captureErrors": true,
+    "portable": { "scriptPolicy": "skip", "preservePaths": [] },
+    "greenPreparation": {
+      "blockedDirectories": [
+        "yy/setup",
+        "yy/update",
+        "yy/doudouclient",
+        "yy/mainframe/ad",
+        "yy/cache/loginbanner",
+        "yy/cache/gameacc",
+        "yy/cache/wonderworld",
+        "yy/cache/yygamelogolist",
+        "yy/business/gameproxy",
+        "yy/business/gamesmilies",
+        "yy/yycomstore/2052/com.yy.apppush",
+        "yy/yycomstore/2052/com.yy.activity",
+        "yy/yycomstore/2052/com.yy.logingiftbag",
+        "yy/yycomstore/2052/com.yy.gameHall",
+        "yy/yycomstore/2052/com.yy.gameproxy",
+        "yy/yycomstore/2052/com.yy.gamestore",
+        "yy/yycomstore/2052/com.yy.gamewonder",
+        "yy/yycomstore/2052/com.yy.gamewakuang",
+        "yy/yycomstore/2052/com.yy.gamechannel",
+        "yy/yycomstore/2052/com.yy.gamechannelbaby",
+        "yy/yycomstore/2052/com.yy.gamecard",
+        "yy/yycomstore/2052/com.yy.gamelivecard",
+        "yy/yycomstore/2052/com.yy.garbagecleaner",
+        "yy/yycomstore/2052/com.yy.gamenotify"
+      ]
+    },
+    "userDataDirectory": "AppData/Roaming/duowan",
+    "dataEntries": [{ "name": "yy", "category": "local" }]
+  }]
+}

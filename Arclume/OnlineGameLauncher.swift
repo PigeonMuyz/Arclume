@@ -459,6 +459,8 @@ enum OnlineGameLauncher {
         crossOverAppPath: String?,
         options: GameOptions
     ) async throws -> OnlineGameLaunchSession {
+        let launchTicket = OnlineGameRuntimeKind.selected() == .bundledWine
+            ? try ArclumeWineStopService.launchTicket() : nil
         if let activeSession = activeLaunchSession() {
             console.log("复用已运行的剑网3 Wine 会话（PID \(activeSession.processIdentifier)）")
             return activeSession
@@ -504,7 +506,8 @@ enum OnlineGameLauncher {
             arguments: installation.preferredLaunchArguments,
             options: options,
             currentDirectoryURL: installation.preferredWorkingDirectory,
-            closeLauncherWhenGameStarts: options.closeLauncherWhenGameStarts
+            closeLauncherWhenGameStarts: options.closeLauncherWhenGameStarts,
+            wineLaunchTicket: launchTicket
         )
     }
 
@@ -515,7 +518,8 @@ enum OnlineGameLauncher {
         arguments: [String],
         options: GameOptions,
         currentDirectoryURL: URL? = nil,
-        closeLauncherWhenGameStarts: Bool = false
+        closeLauncherWhenGameStarts: Bool = false,
+        wineLaunchTicket: Int? = nil
     ) throws -> OnlineGameLaunchSession {
         if OnlineGameRuntimeKind.selected() == .bundledWine {
             return try launchBundledWineExecutable(
@@ -524,7 +528,8 @@ enum OnlineGameLauncher {
                 arguments: arguments,
                 options: options,
                 currentDirectoryURL: currentDirectoryURL,
-                closeLauncherWhenGameStarts: closeLauncherWhenGameStarts
+                closeLauncherWhenGameStarts: closeLauncherWhenGameStarts,
+                wineLaunchTicket: wineLaunchTicket
             )
         }
         guard let crossOverAppPath else {
@@ -632,8 +637,10 @@ enum OnlineGameLauncher {
         arguments: [String],
         options: GameOptions,
         currentDirectoryURL: URL?,
-        closeLauncherWhenGameStarts: Bool
+        closeLauncherWhenGameStarts: Bool,
+        wineLaunchTicket: Int?
     ) throws -> OnlineGameLaunchSession {
+        let launchTicket = try wineLaunchTicket ?? ArclumeWineStopService.launchTicket()
         guard BundledWineRuntime.ownsPrefix(bottleURL),
               BundledWineRuntime.isValidPrefix(at: bottleURL)
         else {
@@ -656,6 +663,7 @@ enum OnlineGameLauncher {
 
         var environment = configuration.environment
         environment["WINEPREFIX"] = bottleURL.path
+        environment = GameAdaptationRules.processEnvironment(environment, executable: executableURL, bottle: bottleURL)
         // Focused input tracing is developer-only. It is limited to the IME
         // and clipboard driver channels, avoiding unbounded server tracing.
         if BundledWineRuntime.verboseWineTraceRequested {
@@ -685,7 +693,8 @@ enum OnlineGameLauncher {
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = logHandle
         process.standardError = logHandle
-        try process.run()
+        do { try ArclumeWineStopService.withLaunchTicket(launchTicket) { try process.run() } }
+        catch { logHandle.closeFile(); throw error }
 
         let processIdentifier = process.processIdentifier
         writeLaunchLog("内置 Wine 已启动（PID \(processIdentifier)）", to: logHandle)

@@ -1,0 +1,6 @@
+{
+  "configurations": [{"id": "5E93661B-1022-4BC4-A44A-90397221532A", "name": "Core", "options": {}}],
+  "defaultOptions": {},
+  "testTargets": [{"target": {"containerPath": "container:Arclume.xcodeproj", "identifier": "383306952F2BE63E00228E6C", "name": "ArclumeTests"}}],
+  "version": 1
+}

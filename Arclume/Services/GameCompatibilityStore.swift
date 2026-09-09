@@ -53,23 +53,6 @@ final class GameCompatibilityStore: ObservableObject {
         update(profile, forCustomGameID: game.id)
     }
 
-    func setGPTK4BetaEnabled(_ isEnabled: Bool, for appID: Int) {
-        guard appID > 0 else { return }
-        var profile = profile(for: appID)
-        profile.gptk4BetaEnabled = isEnabled
-        update(profile, for: appID)
-    }
-
-    func setGPTK4BetaEnabled(_ isEnabled: Bool, for game: Game) {
-        guard game.steamAppID <= 0 else {
-            setGPTK4BetaEnabled(isEnabled, for: game.steamAppID)
-            return
-        }
-        var profile = profile(for: game)
-        profile.gptk4BetaEnabled = isEnabled
-        update(profile, forCustomGameID: game.id)
-    }
-
     func updateCrossOverMacRequirements(
         minimum: String,
         recommended: String,
@@ -130,18 +113,6 @@ final class GameCompatibilityStore: ObservableObject {
                 game.supportsCrossOverCompatibility
                     && profile(for: game).crossOverStatus == .supported
             )
-    }
-
-    func applyRuntimePreferences(for appID: Int, to options: GameOptions) {
-        guard profile(for: appID).gptk4BetaEnabled else { return }
-        options.cxGraphicsBackend = "d3dmetal4"
-        options.d3dMtl4Enabled = true
-    }
-
-    func applyRuntimePreferences(for game: Game, to options: GameOptions) {
-        guard profile(for: game).gptk4BetaEnabled else { return }
-        options.cxGraphicsBackend = "d3dmetal4"
-        options.d3dMtl4Enabled = true
     }
 
     private func update(_ profile: GameCompatibilityProfile, for appID: Int) {
