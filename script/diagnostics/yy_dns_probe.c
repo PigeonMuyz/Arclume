@@ -117,14 +117,28 @@ static const wchar_t *cef_switches(BOOL disable_webgl) {
         L" --disable-gpu --disable-gpu-compositing";
 }
 
-static BOOL cef_arguments(HANDLE process, BOOL disable_webgl) {
+static BOOL cef_debug_switches(wchar_t *out, size_t capacity, BOOL disable_webgl, unsigned port) {
+    if (port && (port < 39200 || port > 39327)) return FALSE;
+    int length = port ? swprintf(out, capacity,
+        L"%ls --remote-debugging-address=127.0.0.1 --remote-debugging-port=%u --debugport=%u", cef_switches(disable_webgl), port, port) :
+        swprintf(out, capacity, L"%ls", cef_switches(disable_webgl));
+    return length >= 0 && (size_t)length < capacity;
+}
+
+static BOOL cef_arguments(HANDLE process, BOOL disable_webgl, unsigned port, BOOL in_process_gpu) {
     typedef LONG (WINAPI *query_fn)(HANDLE, ULONG, void *, ULONG, ULONG *);
     query_fn query = (query_fn)(void *)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQueryInformationProcess");
     ULONG_PTR peb = 0;
     DWORD params = 0, flags = 0;
     struct unicode32 old, updated, check;
     wchar_t command[16384] = {0};
-    const wchar_t *switches = cef_switches(disable_webgl);
+    wchar_t switches[256];
+    if (!cef_debug_switches(switches, 256, disable_webgl, port)) return FALSE;
+    if (in_process_gpu) {
+        const wchar_t extra[] = L" --in-process-gpu";
+        if (wcslen(switches) + wcslen(extra) >= 256) return FALSE;
+        wcscat(switches, extra);
+    }
     SIZE_T switch_bytes = (wcslen(switches) + 1) * sizeof(wchar_t);
     if (!query || query(process, 26, &peb, sizeof(peb), NULL) < 0 || !peb || peb > 0xfffff000 ||
         !remote_read(process, peb + 0x10, &params, sizeof(params)) || !params || params > 0xfffff000 ||
@@ -163,7 +177,7 @@ static BOOL cef_arguments(HANDLE process, BOOL disable_webgl) {
     return ok;
 }
 
-struct tracked { DWORD pid; HANDLE process; BOOL breakpoint, wowbreakpoint, cef_candidate, cef_applied; };
+struct tracked { DWORD pid; HANDLE process; BOOL breakpoint, wowbreakpoint, cef_candidate, cef_applied; unsigned debug_port; };
 static struct tracked children[128];
 
 /* Only print executable addresses and RTTI type names, never stack contents or exception objects. */
@@ -217,13 +231,28 @@ static void exception_details(HANDLE process, DWORD threadID, const EXCEPTION_RE
     if (thread) CloseHandle(thread);
 }
 
+enum { MODE_SOFTWARE_CEF = 1, MODE_NO_WEBGL = 2, MODE_OSR_CPU = 4, MODE_INSPECT = 8, MODE_IN_PROCESS_GPU = 16, MODE_INVALID = 32 };
+static unsigned mode_flags(const wchar_t *arg) {
+    if (!wcscmp(arg, L"--run") || !wcscmp(arg, L"--self-test")) return 0;
+    if (!wcscmp(arg, L"--run-software-cef")) return MODE_SOFTWARE_CEF;
+    if (!wcscmp(arg, L"--run-no-webgl")) return MODE_SOFTWARE_CEF | MODE_NO_WEBGL;
+    if (!wcscmp(arg, L"--run-osr-cpu")) return MODE_OSR_CPU;
+    if (!wcscmp(arg, L"--run-osr-software-cef")) return MODE_OSR_CPU | MODE_SOFTWARE_CEF;
+    if (!wcscmp(arg, L"--run-osr-no-webgl")) return MODE_OSR_CPU | MODE_SOFTWARE_CEF | MODE_NO_WEBGL;
+    if (!wcscmp(arg, L"--run-cef-inspect")) return MODE_OSR_CPU | MODE_SOFTWARE_CEF | MODE_NO_WEBGL | MODE_INSPECT;
+    if (!wcscmp(arg, L"--run-in-process-gpu")) return MODE_OSR_CPU | MODE_SOFTWARE_CEF | MODE_NO_WEBGL | MODE_IN_PROCESS_GPU;
+    return MODE_INVALID;
+}
+
 int wmain(int argc, wchar_t **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
-    if (argc != 2 || (wcscmp(argv[1], L"--run") && wcscmp(argv[1], L"--run-software-cef") &&
-        wcscmp(argv[1], L"--run-no-webgl") && wcscmp(argv[1], L"--run-osr-cpu") && wcscmp(argv[1], L"--self-test"))) return 2;
-    BOOL osr_cpu = !wcscmp(argv[1], L"--run-osr-cpu");
-    BOOL disable_webgl = !wcscmp(argv[1], L"--run-no-webgl");
-    BOOL software_cef = disable_webgl || !wcscmp(argv[1], L"--run-software-cef");
+    if (argc != 2 || mode_flags(argv[1]) == MODE_INVALID) return 2;
+    unsigned flags = mode_flags(argv[1]);
+    BOOL osr_cpu = !!(flags & MODE_OSR_CPU);
+    BOOL disable_webgl = !!(flags & MODE_NO_WEBGL);
+    BOOL software_cef = !!(flags & MODE_SOFTWARE_CEF);
+    BOOL inspect = !!(flags & MODE_INSPECT);
+    BOOL in_process_gpu = !!(flags & MODE_IN_PROCESS_GPU);
     if (!wcscmp(argv[1], L"--self-test")) {
         BYTE *p = VirtualAlloc(NULL, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
         if (!p) return 3;
@@ -231,12 +260,29 @@ int wmain(int argc, wchar_t **argv) {
         DWORD old;
         VirtualProtect(p, 4096, PAGE_EXECUTE_READ, &old);
         BOOL ok = patch(GetCurrentProcess(), p) && !memcmp(p, after, sizeof(after));
+        ok = ok && mode_flags(L"--run") == 0 && mode_flags(L"--self-test") == 0 &&
+            mode_flags(L"--run-software-cef") == MODE_SOFTWARE_CEF &&
+            mode_flags(L"--run-no-webgl") == (MODE_SOFTWARE_CEF | MODE_NO_WEBGL) &&
+            mode_flags(L"--run-osr-cpu") == MODE_OSR_CPU &&
+            mode_flags(L"--run-osr-software-cef") == (MODE_OSR_CPU | MODE_SOFTWARE_CEF) &&
+            mode_flags(L"--run-osr-no-webgl") == (MODE_OSR_CPU | MODE_SOFTWARE_CEF | MODE_NO_WEBGL) &&
+            mode_flags(L"--run-cef-inspect") == (MODE_OSR_CPU | MODE_SOFTWARE_CEF | MODE_NO_WEBGL | MODE_INSPECT) &&
+            mode_flags(L"--run-in-process-gpu") == (MODE_OSR_CPU | MODE_SOFTWARE_CEF | MODE_NO_WEBGL | MODE_IN_PROCESS_GPU) &&
+            mode_flags(L"--invalid") == MODE_INVALID;
         ok = ok && !patch(GetCurrentProcess(), p); /* reject mismatched / repeated writes */
         ok = ok && cef_scope(target) && cef_scope(L"C:\\PortableApps\\YYSpeak\\9.58.0.0\\yyexternal.exe") &&
             !cef_scope(L"C:\\Other\\yyexternal.exe") && !cef_scope(L"C:\\PortableApps\\YYSpeak\\10.0\\YY.exe");
         ok = ok && !wcscmp(cef_switches(FALSE), L" --disable-gpu --disable-gpu-compositing") &&
             !wcscmp(cef_switches(TRUE), L" --disable-gpu --disable-gpu-compositing --disable-webgl");
-        ok = ok && !cef_arguments(GetCurrentProcess(), FALSE) && !cef_arguments(GetCurrentProcess(), TRUE); /* 64-bit probe is out of scope */
+        wchar_t switches[256];
+        ok = ok && cef_debug_switches(switches, 256, TRUE, 0) && !wcscmp(switches, cef_switches(TRUE)) &&
+            cef_debug_switches(switches, 256, TRUE, 39200) &&
+            !wcscmp(switches, L" --disable-gpu --disable-gpu-compositing --disable-webgl --remote-debugging-address=127.0.0.1 --remote-debugging-port=39200 --debugport=39200") &&
+            cef_debug_switches(switches, 256, FALSE, 39327) &&
+            !cef_debug_switches(switches, 256, TRUE, 39199) && !cef_debug_switches(switches, 256, TRUE, 39328) &&
+            !cef_debug_switches(switches, 8, TRUE, 39200);
+        ok = ok && !cef_arguments(GetCurrentProcess(), FALSE, 0, FALSE) && !cef_arguments(GetCurrentProcess(), TRUE, 39200, FALSE) &&
+            !cef_arguments(GetCurrentProcess(), TRUE, 0, TRUE); /* 64-bit probe is out of scope */
         VirtualFree(p, 0, MEM_RELEASE);
         HANDLE f = CreateFileW(dll, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
         ok = ok && f != INVALID_HANDLE_VALUE && hash_matches(f);
@@ -260,7 +306,7 @@ int wmain(int argc, wchar_t **argv) {
     HANDLE verified = CreateFileW(dll, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (verified == INVALID_HANDLE_VALUE || !hash_matches(verified)) { puts("YYPROBE REFUSED: DLL SHA256 mismatch"); return 4; }
     if (osr_cpu && !SetEnvironmentVariableW(L"cef_osr_gpu", L"0")) { CloseHandle(verified); return 4; }
-    printf("YYPROBE mode software_cef=%d disable_webgl=%d osr_cpu=%d\n", software_cef, disable_webgl, osr_cpu);
+    printf("YYPROBE mode software_cef=%d disable_webgl=%d osr_cpu=%d inspect=%d in_process_gpu=%d\n", software_cef, disable_webgl, osr_cpu, inspect, in_process_gpu);
     /* Hold a read-only sharing handle until the complete debug tree exits. */
     STARTUPINFOW startup = { .cb = sizeof(startup) };
     PROCESS_INFORMATION pi = {0};
@@ -268,11 +314,21 @@ int wmain(int argc, wchar_t **argv) {
     if (!CreateProcessW(target, command, NULL, NULL, FALSE, DEBUG_PROCESS, NULL, L"C:\\PortableApps\\YYSpeak", &startup, &pi)) {
         printf("YYPROBE launch failed %lu\n", GetLastError()); CloseHandle(verified); return 5;
     }
-    DebugSetProcessKillOnExit(FALSE);
+    /* Inspection must not leave a privileged debug endpoint after this probe exits. */
+    if (!DebugSetProcessKillOnExit(inspect)) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hThread); CloseHandle(pi.hProcess); CloseHandle(verified);
+        puts("YYPROBE refused: cannot configure debugger exit policy"); return 5;
+    }
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
-    unsigned live = 0, patched = 0;
+    unsigned live = 0, patched = 0, next_debug_port = 39200;
+    ULONGLONG deadline = GetTickCount64() + 15 * 60 * 1000;
     BOOL failed = FALSE;
     for (;;) {
+        if (inspect && GetTickCount64() >= deadline) {
+            puts("YYPROBE inspection lease expired; closing test process tree");
+            failed = TRUE; break;
+        }
         DEBUG_EVENT event;
         if (!WaitForDebugEvent(&event, 1000)) {
             if (GetLastError() == ERROR_SEM_TIMEOUT) continue;
@@ -291,7 +347,12 @@ int wmain(int argc, wchar_t **argv) {
                 const wchar_t *name = !wcsncmp(path, L"\\\\?\\", 4) ? path + 4 : path;
                 child->cef_candidate = len && len < 2048 && cef_scope(name);
                 if (child->cef_candidate) {
-                    child->cef_applied = cef_arguments(child->process, disable_webgl);
+                    if (inspect) {
+                        if (next_debug_port > 39327) { failed = TRUE; break; }
+                        child->debug_port = next_debug_port++;
+                        printf("YYPROBE DEVTOOLS pid=%lu port=%u\n", child->pid, child->debug_port);
+                    }
+                    child->cef_applied = cef_arguments(child->process, disable_webgl, child->debug_port, in_process_gpu);
                     printf("YYPROBE CEF_ARGS_%s pid=%lu stage=create\n", child->cef_applied ? "APPLIED" : "PENDING", child->pid);
                 }
             }
@@ -321,7 +382,7 @@ int wmain(int argc, wchar_t **argv) {
             if (child && event.u.Exception.dwFirstChance && code == EXCEPTION_BREAKPOINT && !child->breakpoint) { child->breakpoint = TRUE; status = DBG_CONTINUE; }
             if (child && event.u.Exception.dwFirstChance && code == 0x4000001f && !child->wowbreakpoint) { child->wowbreakpoint = TRUE; status = DBG_CONTINUE; }
             if (child && child->cef_candidate && !child->cef_applied && status == DBG_CONTINUE) {
-                child->cef_applied = cef_arguments(child->process, disable_webgl);
+                child->cef_applied = cef_arguments(child->process, disable_webgl, child->debug_port, in_process_gpu);
                 printf("YYPROBE CEF_ARGS_%s pid=%lu stage=breakpoint\n", child->cef_applied ? "APPLIED" : "REFUSED", child->pid);
             }
             if (!event.u.Exception.dwFirstChance) {
@@ -335,7 +396,10 @@ int wmain(int argc, wchar_t **argv) {
         if (!ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status)) { failed = TRUE; break; }
         if (!live) break;
     }
-    for (unsigned i = 0; i < 128; ++i) if (children[i].pid) DebugActiveProcessStop(children[i].pid);
+    for (unsigned i = 0; i < 128; ++i) if (children[i].pid) {
+        if (inspect) TerminateProcess(children[i].process, 1);
+        else DebugActiveProcessStop(children[i].pid);
+    }
     CloseHandle(verified);
     printf("YYPROBE complete patches=%u failed=%d\n", patched, failed);
     return failed || !patched ? 6 : 0;

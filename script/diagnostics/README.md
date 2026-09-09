@@ -35,6 +35,30 @@ bash script/diagnostics/yy_dns_probe.sh --run-osr-cpu
 
 ### 频道白屏的软件渲染对照
 
+`--run-in-process-gpu` 保留 OSR CPU/软件绘图/禁用 WebGL，仅增加 `--in-process-gpu` 来验证软件输出跨进程访问窗口表面的影响。此模式不启用调试端口、不使用 `--single-process` 或 `--no-sandbox`；GPU/Browser 的进程隔离及故障边界发生变化，不能视作默认安全等价配置或全局修复。需核验实际进程类型与人工频道表现，正常启动即恢复。
+
+2026-09-09 用户已确认此模式配合独立实验 Runtime 能正常显示、使用频道，详见 `yy_channel_findings.md`。这是已验证的组合，不等于单一参数已在正式 Runtime 上验证；语音收发与无调试器重启还未验收。
+
+`yy_window_state.exe --shadow-preview` 只读查找唯一的频道阴影：QTool、透明分层、禁用、与 QWidget 频道同进程且四边各扩大 30 像素，频道必须包含 YYCefWindow。`--shadow-hide` 才临时隐藏此窗口 30 秒，随后对仍有效的原窗口请求无激活恢复。不要中途终止探针；如意外终止，关闭并重新打开频道恢复阴影。它不修改频道或浏览器窗口的父子关系、样式或配置，且不证明遮挡就是根因。人工确认画面及交互后再判断结果。
+
+`--repaint-channel` 仅对唯一匹配频道请求异步重绘（含子窗口），不改样式或强行同步调用可能阻塞的窗口过程。`--all-visible-windows` 只读列出所有尺寸的可见 YY 窗口，用于观察小型浮层；不打印标题或其他应用窗口。
+
+`--run-cef-inspect` 仅在明确同意本轮网页诊断后使用：保留 `--run-osr-no-webgl` 条件，为每个匹配的 CEF 进程追加独立的本机调试端口（39200–39327），不放宽 Origin、沙箱或网页安全策略。自检不打开端口。必须用 `lsof` 核验实际监听地址是 `127.0.0.1` 后再连接；若出现通配或非本机地址，立即关闭本次 YY。该端口可访问登录页面，其他本机进程也可能访问，因此只短时使用，不导出 Cookie、认证信息、原始 URL/请求正文。调试器退出及 15 分钟到期会终止其测试进程；完成后关闭 YY 并核验监听消失。该模式不写入正式启动配置。
+
+YY 定制 CEF 109 的 `yycefcore.dll` 另行解析 `--debugport=` 并传给 `CefSettings.remote_debugging_port`；本模式同时提供此 YY 参数与标准 CEF 参数。不能因 PEB 参数读回成功就认定浏览器已采用参数。连接使用 `node script/diagnostics/yy_cef_inspect.mjs`（Node 22+）：拒绝非 loopback 监听，只报告 DOM 计数、页面求值是否超时、错误类型及网络统计，不操作页面、不读取 Cookie/Storage 或导出请求正文。网络统计只覆盖附加后的时间段，不是完整加载历史。
+
+只有显式 `--capture-channel` 才另外捕获 CEF 内部频道画面：写入随机临时目录的 0600 PNG，可能含账户、频道或聊天信息，禁止提交或公开。默认不截图。`yy_window_state.exe --pixels` 仅统计窗口稀疏采样的像素分类，不捕获正文；GetPixel 对某些表面不可用，CLR_INVALID 不能作为白屏证据。该工具编译需要 `-lpsapi -lgdi32`。
+
+`yy_window_state.exe --input` 只读记录可见 YY 窗口的 GUI 线程状态与坐标命中，含窄主窗口，不发送点击，不修改焦点、捕获或窗口属性。用来区分鼠标捕获、遮挡与页面无响应；单次结果不能证明应用已恢复。
+
+`--run-osr-no-webgl` 在下述组合模式基础上仅追加 `--disable-webgl`，用于隔离已观察到的 SwiftShader WebGL 等待。保持同一实验 Runtime、OSR CPU 和 DNS 补丁，不增加沙箱降级参数。部分依赖 WebGL 的内容可能缺失，因此仅供诊断，不是默认适配。
+
+`--run-osr-software-cef` 组合既有 OSR CPU 路径与 `--disable-gpu --disable-gpu-compositing`，但不禁用 WebGL，不改变浏览器沙箱。可配合独立 Runtime 覆盖做下一轮验证；原有各单项模式保留。模式解析的自检覆盖所有合法组合及非法参数。
+
+加载锁实验会话中，CEF 在 15:57 报告 GPU 子进程异常退出（exit_code=34），其后绘图命令缓冲区创建失败；这并不证明所有白屏都由 GPU 导致。此次组合对照需同时读回 `cef_osr_gpu=0`、禁用 GPU 参数，再确认频道画面与交互，不能仅看启动自检通过。
+
+`yy_window_state.c` 是独立人工采样工具：`--windows` 只枚举窗口及 WM_NULL 响应；无参数只报告既定图形参数；其他参数采集 YY 线程上下文并立即恢复线程。除固定安装目录外，仅允许当前 APPDATA 下已知版本的 YY 下载登录组件，不扫描其他程序的内存，不打印窗口标题或完整命令行。线程帧链在恢复后读取，仅能用作非原子采样线索，不是精确崩溃转储。
+
 `--run-osr-cpu` 是另一条独立对照：只保留 DNS 补丁，不追加 Chromium GPU/WebGL 参数。先给新启动的 YY 设置进程级 `cef_osr_gpu=0`，再在 `yycefdev2.dll` 加载暂停期间将 RVA `0x2996` 的 `push "1"` 改为 `push "0"`。现有读取配置、`qputenv`、析构和后续流程不变，避免 YY 自身配置再次把变量改回 `1`。模块内既有字符串分别位于 RVA `0x6694`/`0x6648`；支持加载事件发生在重定位前或后，保留重定位逻辑。
 
 只允许下列两个完整路径版本（详见源码），大小均为 48800 字节：

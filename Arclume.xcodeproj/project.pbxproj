@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		3826404E2F2F67A500E1FCC0 /* Flow in Frameworks */ = {isa = PBXBuildFile; productRef = 3826404D2F2F67A500E1FCC0 /* Flow */; };
 		385777BD2F30B37200346515 /* Alamofire in Frameworks */ = {isa = PBXBuildFile; productRef = 385777BC2F30B37200346515 /* Alamofire */; };
-		385777C12F311EA800346515 /* Logo.icon in Resources */ = {isa = PBXBuildFile; fileRef = 385777C02F311EA800346515 /* Logo.icon */; };
 		385A91CE2F2D1561006CCF47 /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = 385A91CD2F2D1561006CCF47 /* Kingfisher */; };
 /* End PBXBuildFile section */
 
@@ -284,7 +283,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				385777C12F311EA800346515 /* Logo.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -472,8 +470,8 @@
 			baseConfigurationReferenceAnchor = 383306862F2BE63D00228E6C /* Arclume */;
 			baseConfigurationReferenceRelativePath = Config.xcconfig;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = Logo;
-				"ASSETCATALOG_COMPILER_APPICON_NAME[sdk=macosx*]" = Logo;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"ASSETCATALOG_COMPILER_APPICON_NAME[sdk=macosx*]" = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = ArclumeAccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				AUTOMATION_APPLE_EVENTS = YES;
@@ -481,7 +479,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 8JFR5LUFAJ;
 				ENABLE_APP_SANDBOX = NO;
@@ -512,7 +510,7 @@
 					"$(PROJECT_DIR)/Arclume/Libs",
 					"$(PROJECT_DIR)/Arclume/Libs/d3dMetal3/external",
 				);
-				MARKETING_VERSION = 1.0.2;
+				MARKETING_VERSION = 1.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.pigeonmuyz.arclume;
 				PRODUCT_MODULE_NAME = Arclume;
 				PRODUCT_NAME = Arclume;
@@ -538,8 +536,8 @@
 			baseConfigurationReferenceAnchor = 383306862F2BE63D00228E6C /* Arclume */;
 			baseConfigurationReferenceRelativePath = Config.xcconfig;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = Logo;
-				"ASSETCATALOG_COMPILER_APPICON_NAME[sdk=macosx*]" = Logo;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				"ASSETCATALOG_COMPILER_APPICON_NAME[sdk=macosx*]" = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = ArclumeAccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				AUTOMATION_APPLE_EVENTS = YES;
@@ -547,7 +545,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 8JFR5LUFAJ;
 				ENABLE_APP_SANDBOX = NO;
@@ -578,7 +576,7 @@
 					"$(PROJECT_DIR)/Arclume/Libs",
 					"$(PROJECT_DIR)/Arclume/Libs/d3dMetal3/external",
 				);
-				MARKETING_VERSION = 1.0.2;
+				MARKETING_VERSION = 1.0.3;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.pigeonmuyz.arclume;
 				PRODUCT_MODULE_NAME = Arclume;
 				PRODUCT_NAME = Arclume;

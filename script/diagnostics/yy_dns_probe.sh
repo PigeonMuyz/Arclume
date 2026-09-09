@@ -1,7 +1,14 @@
 #!/bin/bash
 # Explicit one-session probe. No registry edits or persistent DLL overrides.
 set -euo pipefail
-case "${1:-}" in --run|--run-software-cef|--run-no-webgl|--run-osr-cpu|--self-test) ;; *) echo 'usage: bash script/diagnostics/yy_dns_probe.sh --self-test|--run|--run-software-cef|--run-no-webgl|--run-osr-cpu'; exit 2;; esac
+case "${1:-}" in --run|--run-software-cef|--run-no-webgl|--run-osr-cpu|--run-osr-software-cef|--run-osr-no-webgl|--run-cef-inspect|--run-in-process-gpu|--self-test) ;; *) echo 'usage: bash script/diagnostics/yy_dns_probe.sh --self-test|--run|--run-software-cef|--run-no-webgl|--run-osr-cpu|--run-osr-software-cef|--run-osr-no-webgl|--run-cef-inspect|--run-in-process-gpu'; exit 2;; esac
+if [[ "$1" == --run-cef-inspect ]]; then
+    command -v lsof >/dev/null
+    if lsof -nP -iTCP:39200-39327 -sTCP:LISTEN >/dev/null; then
+        echo 'Inspection ports are occupied; nothing was started.'; exit 3
+    fi
+    echo 'Explicit inspection: verify loopback listeners before use; test YY closes after 15 minutes.'
+fi
 probe_root="$(cd "$(dirname "$0")/../.." && pwd)"
 probe_support="$HOME/Library/Application Support/Arclume"
 probe_runtime="$probe_support/OnlineGameRuntimes/arclume-wine-runtime-x86_64"
