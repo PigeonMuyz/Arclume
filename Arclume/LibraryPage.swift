@@ -21,14 +21,26 @@ struct LibraryPage: View {
     @State private var mntObserver: MountObserver?
     @State private var loadGeneration = 0
     @State private var metadataRefreshTask: Task<Void, Never>?
+    @State private var libraryScanner = SteamLibraryScanner()
+    @State private var scanInProgress = false
+    @State private var scanAgain = false
+    @State private var lastScan = Date.distantPast
     @State private var showOnlineSetupGuide = false
     @State private var showOnlineRuntimeUpdate = false
     @State private var didOfferOnlineSetupGuide = false
     @State private var jx3LaunchMonitor: Task<Void, Never>?
+    @AppStorage("libraryPresentation", store: UserDefaults(suiteName: suiteName))
+    private var libraryPresentation = "grid"
+    @AppStorage("unifiedLibraryOnboarding.v1", store: UserDefaults(suiteName: suiteName))
+    private var completedUnifiedOnboarding = false
+    @State private var showUnifiedOnboarding = false
+    @State private var showUnifiedJX3Setup = false
+    @State private var configureSteamAfterJX3 = false
+    @State private var launcherTitle = "Arclume"
     
     var body: some View {
         ZStack {
-            if libraryPageGlobals.isLaunchingGame && !OnlineGameMode.isEnabled {
+            if libraryPageGlobals.isLaunchingGame && !OnlineGameMode.isEnabled && libraryPresentation != "launcher" {
                 VStack {
                     ProgressView(label: {
                         Text(
@@ -87,7 +99,7 @@ struct LibraryPage: View {
                                 Label(L10n.string("No Libraries found"), systemImage: "gamecontroller")
                                     .padding(.bottom)
                             } description: {
-                                Text(L10n.string("No Steam libraries found.\nPlease add a Steam library folder."))
+                                Text("可以添加 Windows 程序、原生应用或 Steam 游戏库。Steam 是可选组件。")
                                 Button {
                                     libraryPageGlobals.showOptions = true
                                 } label: {
@@ -124,13 +136,20 @@ struct LibraryPage: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .foregroundStyle(.white)
                     }
+                } else if libraryPresentation == "launcher" {
+                    LauncherLibraryView(selectedTitle: $launcherTitle, onLaunchJX3: launchJX3Game, onStopJX3: forceQuitJX3Game)
                 } else {
                     GamesList(load: load)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .sheet(isPresented: $libraryPageGlobals.showOptions) {
-                OptionsView(load: load)
+                OptionsView(load: load, onShowWelcome: {
+                    libraryPageGlobals.showOptions = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        showUnifiedOnboarding = true
+                    }
+                })
             }
             .sheet(isPresented: $showOnlineSetupGuide) {
                 OnlineGameSetupGuide(
@@ -143,6 +162,15 @@ struct LibraryPage: View {
                     isPresented: $showOnlineRuntimeUpdate,
                     load: load
                 )
+            }
+            .sheet(isPresented: $showUnifiedJX3Setup, onDismiss: {
+                Task { await load() }
+                if configureSteamAfterJX3 {
+                    configureSteamAfterJX3 = false
+                    openSteamConfiguration()
+                }
+            }) {
+                UnifiedJX3SetupView()
             }
             .alert(
                 "无法启动剑网3",
@@ -173,9 +201,7 @@ struct LibraryPage: View {
                 Text(libraryPageGlobals.wineStopErrorMessage ?? "")
             }
             .sheet(isPresented: $libraryPageGlobals.showDetailView) {
-                Modal(showModal: $libraryPageGlobals.showDetailView, collapse: true, content:  {
-                    GameDetailView(game: $libraryPageGlobals.selectedGame)
-                })
+                GameDetailView(game: $libraryPageGlobals.selectedGame)
             }
             .sheet(isPresented: $libraryPageGlobals.showCustomGameEditor) {
                 Modal(
@@ -203,7 +229,7 @@ struct LibraryPage: View {
                         .padding()
                         .transition(.opacity)
                     }
-                } else {
+                } else if libraryPresentation != "launcher" {
                     HStack(alignment: .bottom) {
                         ArclumeToolbar()
                         Spacer()
@@ -239,13 +265,36 @@ struct LibraryPage: View {
                     }
                 }
             }
+            .overlay(alignment: .bottomLeading) {
+                if libraryPresentation == "launcher" && !OnlineGameMode.isEnabled {
+                    HStack(spacing: 14) {
+                        if containerSteamStore.steamSetupBusy {
+                            ProgressView(value: containerSteamStore.steamSetupProgress)
+                                .frame(width: 100)
+                                .help(containerSteamStore.steamSetupMessage ?? "正在安装 Steam…")
+                        } else if isLoading {
+                            ProgressView().controlSize(.small).help("正在后台更新游戏库")
+                        }
+                    }
+                    .padding(.leading, 84)
+                    .padding(18)
+                }
+            }
+            .navigationTitle(libraryPresentation == "launcher" ? launcherTitle : "Arclume")
+            .background {
+                if !OnlineGameMode.isEnabled {
+                    LibraryWindowTitle(title: libraryPresentation == "launcher" ? launcherTitle : "Arclume")
+                }
+            }
+            .toolbarBackgroundVisibility(libraryPresentation == "launcher" ? .hidden : .automatic, for: .windowToolbar)
             .onAppear() {
-                isLoading = true // fixes missing library issue
+                libraryPageGlobals.restoreSnapshot(context: appGlobals.selectedBottle)
+                isLoading = !libraryPageGlobals.hasLibrarySnapshot
                 if loadDebugFixtureIfRequested() {
                     isLoading = false
                     return
                 }
-                try? FileManager.default.createDirectory(at: ARCLUME_SUPPORT_FOLDER_URL.appendingPathComponent(DEFAULT_CXP_BOTTLES_FOLDER), withIntermediateDirectories: true)
+                showUnifiedOnboarding = !completedUnifiedOnboarding
                 if OnlineGameMode.isEnabled,
                    !didOfferOnlineSetupGuide {
                     // A mode switch leaves the shared selection pointing at
@@ -288,15 +337,35 @@ struct LibraryPage: View {
                 metadataRefreshTask?.cancel()
                 metadataRefreshTask = nil
             }
+            .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                libraryPageGlobals.refreshLocalProgramAvailability()
+                if Date().timeIntervalSince(lastScan) > 30 { Task { await load() } }
+            }
+            .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { _ in
+                if NSApplication.shared.isActive && !scanInProgress { Task { await load() } }
+            }
+            .onReceive(Timer.publish(every: 5, on: .main, in: .common).autoconnect()) { _ in
+                // Revalidate saved launch paths without repeatedly scanning containers.
+                if NSApplication.shared.isActive {
+                    libraryPageGlobals.refreshLocalProgramAvailability()
+                }
+            }
             .toolbar {
-                LibraryTitlebar(
+                if !showUnifiedOnboarding { LibraryTitlebar(
                     libraryPageGlobals: libraryPageGlobals,
                     load: load,
-                    isOnlineMode: OnlineGameMode.isEnabled
-                )
+                    isOnlineMode: OnlineGameMode.isEnabled,
+                    isLauncherPresentation: libraryPresentation == "launcher"
+                ) }
             }
             .environmentObject(libraryPageGlobals)
             .environmentObject(windowsInstallerStore)
+            .disabled(showUnifiedOnboarding)
+            .accessibilityHidden(showUnifiedOnboarding)
+            if showUnifiedOnboarding {
+                LibraryWelcomeView(onFinish: finishUnifiedOnboarding)
+                    .zIndex(20)
+            }
         }
     }
 
@@ -349,6 +418,24 @@ struct LibraryPage: View {
         #endif
     }
     
+    private func finishUnifiedOnboarding(steam: Bool, jx3: Bool) {
+        completedUnifiedOnboarding = true
+        showUnifiedOnboarding = false
+        if jx3 {
+            configureSteamAfterJX3 = steam
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showUnifiedJX3Setup = true }
+        } else if steam {
+            openSteamConfiguration()
+        }
+    }
+
+    private func openSteamConfiguration() {
+        libraryPageGlobals.requestedSettingsPage = "运行时"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            libraryPageGlobals.showOptions = true
+        }
+    }
+
     @MainActor
     private func load() async {
         guard !isDebugFixtureRequested else { return }
@@ -356,15 +443,24 @@ struct LibraryPage: View {
             await loadOnlineGames()
             return
         }
+        guard !scanInProgress else { scanAgain = true; return }
+        scanInProgress = true
+        lastScan = Date()
+        let scanContext = appGlobals.selectedBottle
         metadataRefreshTask?.cancel()
         metadataRefreshTask = nil
         loadGeneration += 1
         let generation = loadGeneration
-        isLoading = true
+        isLoading = !libraryPageGlobals.hasLibrarySnapshot
         errorMessage = nil
         defer {
+            scanInProgress = false
             if generation == loadGeneration {
                 isLoading = false
+            }
+            if scanAgain {
+                scanAgain = false
+                Task { await load() }
             }
         }
         progress = 0
@@ -374,8 +470,18 @@ struct LibraryPage: View {
         )
         appGlobals.windowsSteamFolder = containerSteamStore.installation?.steamRootURL
         appGlobals.refreshSteamIdentity(containerInstallation: containerSteamStore.installation)
-        let folders = getSteamFolderPaths()
+        let discoveredFolders = (appGlobals.nativeSteamInstallation?.libraryURLs ?? [])
+            + (containerSteamStore.installation?.libraries.compactMap(\.steamAppsURL) ?? [])
+        // Keep discovered external libraries while their volume is temporarily offline.
+        let offlineFolders = libraryPageGlobals.folders.filter {
+            guard let url = URL(string: $0) else { return false }
+            return !FileManager.default.fileExists(atPath: url.path)
+        }
+        let folders = Array(Set(getSteamFolderPaths() + discoveredFolders.map(\.absoluteString) + offlineFolders)).sorted()
+        libraryPageGlobals.folders = folders
         var loadedGamesMeta: [GamesMeta] = []
+        var scannedRecords: [LibraryManifestRecord] = []
+        await libraryScanner.seed(libraryPageGlobals.scanRecords)
         var ownershipByAppID: [Int: Set<SteamClientKind>] = [:]
         var ownershipSessionCacheKeys: [SteamClientKind: String] = [:]
         let detectedNativeSteam = appGlobals.nativeSteamInstallation
@@ -396,19 +502,18 @@ struct LibraryPage: View {
                 let scanURL = steamAppsFolderURL(for: folderURL)
                     ?? folderURL.standardizedFileURL
                 do {
-                    let foldergamesMeta = try getGamesMeta(
-                        from: folderURL,
-                        isNativeSteamLibrary: nativeLibraryPaths.contains(
-                            scanURL.path
-                        )
-                    )
-                    loadedGamesMeta.append(contentsOf: foldergamesMeta)
+                    let records = try await libraryScanner.scan(folderURL, native: nativeLibraryPaths.contains(scanURL.path))
+                    scannedRecords.append(contentsOf: records)
+                    loadedGamesMeta.append(contentsOf: records.map { $0.model() })
                 } catch {
                     console.error(String(reflecting: error))
                     let retainedGamesMeta = libraryPageGlobals.gamesMeta.filter {
                         $0.libraryFolder.standardizedFileURL.path == scanURL.path
                     }
                     if !retainedGamesMeta.isEmpty {
+                        scannedRecords.append(contentsOf: libraryPageGlobals.scanRecords.filter {
+                            $0.library.standardizedFileURL.path == scanURL.path
+                        })
                         console.warn(
                             "Retaining \(retainedGamesMeta.count) games from the previous scan of \(scanURL.path)"
                         )
@@ -431,10 +536,10 @@ struct LibraryPage: View {
         var ownedAppIDsBySteamID: [String: Set<String>] = [:]
         for session in appGlobals.steamSessions {
             ownershipSessionCacheKeys[session.clientKind] = session.cacheKey
-            let scanResult = ownedLibraryService.scanOwnedAppIDs(
-                steamID: session.identity.steamID,
-                steamRootURLs: [session.steamRootURL]
-            )
+            let scanResult = await Task.detached(priority: .utility) {
+                SteamOwnedLibraryService().scanOwnedAppIDs(steamID: session.identity.steamID,
+                    steamRootURLs: [session.steamRootURL])
+            }.value
             var sessionAppIDs = Set(
                 scanResult.appIDs
             )
@@ -485,7 +590,7 @@ struct LibraryPage: View {
             ownershipByAppID[appID, default: []].formUnion(accountOwnership)
         }
 
-        let ownedMeta = ownershipByAppID.keys
+        let ownedMeta = ownershipByAppID.keys.sorted()
             .filter { appID in
                 !loadedGamesMeta.contains(where: { $0.appid == String(appID) })
             }
@@ -511,8 +616,11 @@ struct LibraryPage: View {
         // inside the newly selected prefix.
         for index in loadedGames.indices where !loadedGames[index].isNative {
             if let meta = loadedGamesMeta.first(where: { $0.appid == String(loadedGames[index].steamAppID) && !$0.isNative }),
+               !(containerSteamStore.installation?.libraries.compactMap(\.steamAppsURL) ?? []).contains(where: {
+                   $0.resolvingSymlinksInPath().standardizedFileURL == meta.libraryFolder.resolvingSymlinksInPath().standardizedFileURL
+               }),
                ![BundledWineRuntime.prefixURL, BundledWineRuntime.standardSteamPrefixURL].contains(where: {
-                   meta.libraryFolder.standardizedFileURL.path.hasPrefix($0.standardizedFileURL.path + "/")
+                   meta.libraryFolder.resolvingSymlinksInPath().standardizedFileURL.path.hasPrefix($0.standardizedFileURL.path + "/")
                }) {
                 loadedGames[index].installedRuntimeKind = StandardGameRuntimeKind.crossOver.rawValue
             }
@@ -521,7 +629,14 @@ struct LibraryPage: View {
             let installation = await Task.detached(priority: .utility) {
                 OnlineGameDiscovery.jx3Installation(in: bottleURL)
             }.value
-            loadedGames.append(contentsOf: OnlineGameDiscovery.games(from: installation))
+            guard generation == loadGeneration, !Task.isCancelled else { return }
+            if let launcher = OnlineGameDiscovery.games(from: installation).first {
+                libraryPageGlobals.registerStandardJX3(
+                    launcher, bottle: bottleURL,
+                    runtimeKind: OnlineGameRuntimeKind.selected().rawValue,
+                    crossOverPath: appGlobals.cxAppPath
+                )
+            }
         }
         guard generation == loadGeneration, !Task.isCancelled else { return }
         libraryPageGlobals.folders = folders
@@ -540,10 +655,14 @@ struct LibraryPage: View {
                 }
             }
         }
+        guard scanContext == appGlobals.selectedBottle else { scanAgain = true; return }
         libraryPageGlobals.gamesMeta = loadedGamesMeta
-        libraryPageGlobals.games = loadedGames
+        libraryPageGlobals.applyScannedGames(loadedGames)
+        libraryPageGlobals.scanRecords = scannedRecords
         libraryPageGlobals.ownershipByAppID = ownershipByAppID
         libraryPageGlobals.ownershipSessionCacheKeys = ownershipSessionCacheKeys
+        libraryPageGlobals.hasLibrarySnapshot = true
+        libraryPageGlobals.saveSnapshot(context: scanContext)
         progress = 100
 
         metadataRefreshTask = Task(priority: .utility) {
@@ -576,6 +695,7 @@ struct LibraryPage: View {
             guard generation == loadGeneration, !Task.isCancelled else { return }
             await libraryPageGlobals.refreshNativeSteamMetadata()
             guard generation == loadGeneration, !Task.isCancelled else { return }
+            libraryPageGlobals.saveSnapshot(context: scanContext)
         }
     }
 

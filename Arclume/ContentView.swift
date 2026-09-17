@@ -24,6 +24,8 @@ final class Router: ObservableObject {
 }
 
 struct ContentView: View {
+    @AppStorage("libraryPresentation", store: UserDefaults(suiteName: suiteName))
+    private var libraryPresentation = "grid"
     @State private var compactHomeVisible = false
     @AppStorage("jx3CompactHome", store: UserDefaults(suiteName: suiteName))
     private var compactJX3Home = false
@@ -40,6 +42,16 @@ struct ContentView: View {
     @StateObject private var compatibilityStore = GameCompatibilityStore()
     @StateObject private var nativeRuntimeStore = NativeAppRuntimeStore()
 
+    private var libraryWindowSize: CGSize {
+        guard libraryPresentation == "launcher", modeStore.selectedMode?.isOnlineGameMode != true else {
+            return CGSize(width: compactHomeVisible ? 720 : windowWidth, height: compactHomeVisible ? 480 : windowHeight)
+        }
+        // Keep the launcher wide, while leaving room for the title bar and Dock on smaller displays.
+        let visible = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1440, height: 900)
+        let scale = min(1, (visible.width - 40) / 1280, (visible.height - 100) / 720)
+        return CGSize(width: 1280 * scale, height: 720 * scale)
+    }
+
     var body: some View {
         Group {
             if modeStore.selectedMode?.isOnlineGameMode == true {
@@ -55,8 +67,8 @@ struct ContentView: View {
         .animation(.easeInOut, value: router.route)
         .onPreferenceChange(JX3CompactHomePreferenceKey.self) { compactHomeVisible = $0 }
         .frame(
-            width: appWindowResizable ? nil : (compactHomeVisible ? 720 : windowWidth),
-            height: appWindowResizable ? nil : (compactHomeVisible ? 480 : windowHeight)
+            width: appWindowResizable ? nil : libraryWindowSize.width,
+            height: appWindowResizable ? nil : libraryWindowSize.height
         )
         .preferredColorScheme(.dark)
         .environmentObject(router)
@@ -90,6 +102,9 @@ struct ContentView: View {
             guard !ArclumeTestEnvironment.isTesting else { return }
             await updateService.checkForUpdatesAtLaunch()
         }
+        .task(id: modeStore.selectedMode) { configureWineWarmup() }
+        .onChange(of: appGlobals.selectedBottle) { _, _ in configureWineWarmup() }
+        .onReceive(NotificationCenter.default.publisher(for: .arclumeWinePrefixReady).receive(on: DispatchQueue.main)) { _ in configureWineWarmup() }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active && !ArclumeTestEnvironment.isTesting {
                 nativeRuntimeStore.reconcileRunningApplications()
@@ -99,19 +114,18 @@ struct ContentView: View {
 
     @ViewBuilder
     private var routedContent: some View {
-        if let selectedMode = modeStore.selectedMode {
             switch router.route {
             case .libraryPage:
                 LibraryPage()
-                    .id(selectedMode.rawValue)
             case .profilePage:
                 Text(L10n.string("Profile Page"))
             }
-        } else {
-            ModeSelectionView { mode in
-                modeStore.select(mode)
-            }
-        }
+    }
+
+    private func configureWineWarmup() {
+        guard !ArclumeTestEnvironment.isTesting else { return }
+        let prefix: URL? = BundledWineRuntime.standardSteamPrefixURL
+        WineWarmupService.shared.configure(prefix: prefix)
     }
 }
 

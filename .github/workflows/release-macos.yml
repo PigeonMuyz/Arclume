@@ -60,7 +60,7 @@ jobs:
           test -n "$version"
           test -n "$build"
 
-          expected_tag="v${version}-${build}"
+          expected_tag="v${version}"
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
             directive="$RELEASE_INPUT"
           else
@@ -99,7 +99,7 @@ jobs:
             echo "version=$version"
             echo "build=$build"
             echo "runtime_version=$runtime_version"
-            echo "release_name=Arclume $version ($build)"
+            echo "release_name=Arclume $version"
           } >> "$GITHUB_OUTPUT"
 
       - name: 检查发布签名配置
@@ -194,8 +194,8 @@ jobs:
           # temporary package paths unique to this workflow attempt so a failed
           # prior attempt never blocks a later release.
           mkdir -p "$artifact_dir"
-          full_dmg_path="$artifact_dir/Arclume-${VERSION}-${BUILD}-with-runtime.dmg"
-          lite_dmg_path="$artifact_dir/Arclume-${VERSION}-${BUILD}-no-runtime.dmg"
+          full_dmg_path="$artifact_dir/Arclume-${VERSION}-with-runtime.dmg"
+          lite_dmg_path="$artifact_dir/Arclume-${VERSION}-no-runtime.dmg"
 
           hdiutil create \
             -volname "Arclume" \

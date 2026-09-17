@@ -4,9 +4,9 @@
 
 App 版本只从 Xcode 项目读取：
 
-- `MARKETING_VERSION`：面向用户的版本，例如 `1.0.1`。
-- `CURRENT_PROJECT_VERSION`：构建号，例如 `3`。
-- GitHub Release tag：`v<MARKETING_VERSION>-<CURRENT_PROJECT_VERSION>`，例如 `v1.0.1-3`。
+- `MARKETING_VERSION`：面向用户的版本，例如 `1.0.4`，每次公开发布必须递增。
+- `CURRENT_PROJECT_VERSION`：内部构建号，例如 `9`，保留但不拼接到显示版本和发布名称中。
+- GitHub Release tag：`v<MARKETING_VERSION>`，例如 `v1.0.4`；更新器仍兼容历史 `v1.0.3-8` 格式。
 
 Runtime 版本从 `arclume-wine-runtime.json` 的 `version` 字段读取。不要手动在 Release Notes 中写死 Runtime 版本。
 
@@ -24,8 +24,8 @@ Runtime 版本从 `arclume-wine-runtime.json` 的 `version` 字段读取。不�
 
 | 指令 | 行为 |
 | --- | --- |
-| `release: 1.0.1-3` | 指令版本必须等于项目内部版本；不一致时 workflow 失败。 |
-| `release: v1.0.1-3` | 与上相同。 |
+| `release: 1.0.4` | 指令版本必须等于项目内部版本；不一致时 workflow 失败。 |
+| `release: v1.0.4` | 与上相同。 |
 | `release: github actions` | workflow 读取项目内部版本并生成 tag。 |
 | 手动 workflow | 输入 `github actions` 或明确版本。 |
 
@@ -35,8 +35,8 @@ Runtime 版本从 `arclume-wine-runtime.json` 的 `version` 字段读取。不�
 
 | 资产 | 内容 |
 | --- | --- |
-| `Arclume-<version>-<build>-with-runtime.dmg` | 包含验证过的 Wine 归档，适合首次或离线初始化。 |
-| `Arclume-<version>-<build>-no-runtime.dmg` | 移除 Wine 归档，适合已有 Runtime 的用户。 |
+| `Arclume-<version>-with-runtime.dmg` | 包含验证过的 Wine 归档，适合首次或离线初始化。 |
+| `Arclume-<version>-no-runtime.dmg` | 移除 Wine 归档，适合已有 Runtime 的用户。 |
 | `*.dmg.sha256` | 对应 DMG 的 SHA-256。 |
 
 每个 DMG 都由 `hdiutil verify` 校验。应用内更新会校验下载 DMG 的 SHA-256、Bundle ID、版本和构建号，然后使用暂存替换和回滚路径覆盖当前 App；不会校验发布 App 的开发者签名。

@@ -352,6 +352,7 @@ struct OnlineGameSetupGuide: View {
                     "准备剑网3运行时",
                     detail: "使用 Arclume 内置 Wine。已有 CrossOver 容器与文件保持原样。"
                 )
+                WineWarmupOption(showsStatus: false)
                 Button {
                     chooseRuntime(.bundledWine)
                 } label: {

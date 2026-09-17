@@ -466,11 +466,10 @@ enum OnlineGameLauncher {
             return activeSession
         }
 
-        if OnlineGameRuntimeKind.selected() == .bundledWine {
-            await MicrophoneAuthorization.requestForBundledWineLaunchIfNeeded()
-        }
-
         OnlineGameMode.applyDefaultRuntimePreferences(to: options)
+        if OnlineGameRuntimeKind.selected() == .bundledWine {
+            try await WineWarmupService.shared.prepareForLaunch(prefix: bottleURL, wineMSync: options.wineMSync)
+        }
         let installation = OnlineGameDiscovery.jx3Installation(in: bottleURL)
         guard let executableURL = installation.preferredLaunchURL else {
             throw CocoaError(.fileNoSuchFile)
@@ -1056,6 +1055,7 @@ enum OnlineGameLauncher {
         runtime: OnlineGameRuntimeKind,
         crossOverAppPath: String?
     ) throws {
+        let launchTicket = runtime == .bundledWine ? try ArclumeWineStopService.launchTicket() : nil
         let process = Process()
         var environment = ProcessInfo.processInfo.environment
         switch runtime {
@@ -1096,7 +1096,8 @@ enum OnlineGameLauncher {
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
+        if let launchTicket { try ArclumeWineStopService.withLaunchTicket(launchTicket) { try process.run() } }
+        else { try process.run() }
         process.waitUntilExit()
     }
 

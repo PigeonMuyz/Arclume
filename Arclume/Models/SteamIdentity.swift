@@ -5,7 +5,7 @@
 
 import Foundation
 
-nonisolated enum SteamClientKind: String, Hashable, Sendable {
+nonisolated enum SteamClientKind: String, Hashable, Sendable, Codable {
     case native
     case container
 }

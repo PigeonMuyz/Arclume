@@ -49,8 +49,7 @@ func getCXPatcherBottlesURL(appDir: URL)  throws -> URL {
     
     // fallback if it doesn't find it in the config file (just in case)
     console.warn("Couldn't find CXPatcher bottles configuration: " + confPath.absoluteString)
-    let bottlePathForCXP: URL = ARCLUME_SUPPORT_FOLDER_URL.appendingPathComponent(DEFAULT_CXP_BOTTLES_FOLDER, isDirectory: true)
-    return bottlePathForCXP
+    return getCXDefaultBottlesURL()
 }
 
 func getAllBottles(appDir: URL) throws -> [URL] {
@@ -254,7 +253,7 @@ func toCrossoverENVString(_ key: String, _ value: String) -> String {
 
 func parseCXEnvVarString(_ string: String) -> (String, String){
     // "KEY"="VALUE"
-    // e.g.: "CX_BOTTLE_PATH"="/Users/${USER}/CXPBottles"
+    // Existing explicit CX_BOTTLE_PATH values remain supported.
     let regex = /\"(\w+?)\"\=\"(.+?)\"/
     var key = ""
     var value = ""

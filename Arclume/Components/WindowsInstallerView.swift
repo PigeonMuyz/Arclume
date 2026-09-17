@@ -2,6 +2,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct WindowsInstallerView: View {
+    var title = "安装 Windows 程序"
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appGlobals: AppGlobals
     @EnvironmentObject private var libraryPageGlobals: LibraryPageGlobals
@@ -20,7 +21,7 @@ struct WindowsInstallerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("安装 Windows 程序").font(.title2.bold())
+            Text(title).font(.title2.bold())
             LabeledContent("安装包") {
                 Button(installer?.lastPathComponent ?? "选择安装包或压缩包…") { showFilePicker = true }
                     .lineLimit(1).help(installer?.path ?? "选择本地安装包")

@@ -199,10 +199,7 @@ final class ArclumeUpdateService: ObservableObject {
     }
 
     var currentApplicationVersion: String {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "0"
-        let build = info?["CFBundleVersion"] as? String ?? "0"
-        return build == version ? version : "\(version) (\(build))"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
     var isApplicationUpdateAvailable: Bool {

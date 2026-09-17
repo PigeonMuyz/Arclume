@@ -69,7 +69,7 @@ enum OnlineGameMode {
     }
 
     static var isEnabled: Bool {
-        ArclumeMode.persisted?.isOnlineGameMode == true
+        false // A single library now owns all games; legacy mode values are ignored.
     }
 
     static func isJX3(_ game: Game) -> Bool {

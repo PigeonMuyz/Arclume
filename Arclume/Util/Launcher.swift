@@ -236,6 +236,7 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
     }
     if (installedRuntimeKind.flatMap(StandardGameRuntimeKind.init(rawValue:)) ?? StandardGameRuntimeKind.selected()) == .bundledWine {
         let launchTicket = try ArclumeWineStopService.launchTicket()
+        try await WineWarmupService.shared.prepareForLaunch(prefix: bottleURL, wineMSync: options.wineMSync)
         guard (BundledWineRuntime.ownsStandardSteamPrefix(bottleURL)
                || (appExeURL != nil && BundledWineRuntime.ownsPrefix(bottleURL))),
               BundledWineRuntime.isValidPrefix(at: bottleURL)
@@ -258,9 +259,17 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
             extraArguments = WindowsGameLaunchRules.arguments(for: appExeURL, userArguments: extraArguments)
         }
         let target = appExeURL?.path(percentEncoded: false) ?? steamExePath
-        let arguments = appExeURL == nil
+        let normalArguments = appExeURL == nil
             ? [target] + steamBootOptions + ["-applaunch", id] + extraArguments
             : (appExeURL?.pathExtension.lowercased() == "lnk" ? ["start.exe", "/unix", target] : [target]) + extraArguments
+        let supportedArguments = try YYLaunchSupport.arguments(executable: appExeURL, bottle: bottleURL, userArguments: extraArguments)
+        let arguments = supportedArguments ?? normalArguments
+        if supportedArguments != nil {
+            // The helper owns YY's Windows process tree; do not name the helper
+            // as the user's application or allow inherited inspection switches.
+            environment.removeValue(forKey: "WINEPRELOADERAPPNAME")
+            environment["cef_osr_gpu"] = "0"
+        }
         let process = Process()
         process.executableURL = configuration.wineURL
         process.arguments = arguments
@@ -271,6 +280,24 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         let diagnostic = try WindowsProgramDiagnosticLog.configure(process, executable: appExeURL, bottle: bottleURL, environment: &environment)
+        if supportedArguments != nil {
+            diagnostic?.append(Data("Arclume YY support: yy-9.58-v1; checked DNS/OSR memory patches; in-process software output; no debug port\n".utf8))
+            process.standardOutput = process.standardError
+            process.terminationHandler = { completed in
+                let status = completed.terminationStatus
+                guard completed.terminationReason == .exit, [2, 3, 4, 5, 6, 7].contains(status) else { return }
+                Task { @MainActor in
+                    guard !ArclumeWineStopService.isStopping else { return }
+                    let alert = NSAlert()
+                    alert.messageText = "YY 兼容启动未完成"
+                    alert.informativeText = status == 7
+                        ? "已有 YY 进程正在运行。请完全退出 YY 后再从 Arclume 启动；没有终止原进程。"
+                        : "兼容组件拒绝了不匹配的文件，或 YY 运行期间发生异常（代码 \(status)）。本次 YY 已停止，未修改磁盘 DLL 或登录数据。诊断保存在 Arclume/WindowsProgramLogs。"
+                    alert.alertStyle = .warning
+                    alert.runModal()
+                }
+            }
+        }
         process.environment = environment
         do { try ArclumeWineStopService.withLaunchTicket(launchTicket) { try process.run() } }
         catch { diagnostic?.finish(); throw error }

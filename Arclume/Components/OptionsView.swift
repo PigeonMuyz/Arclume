@@ -10,6 +10,8 @@ struct OptionsView: View {
     @State private var selectedSettingsPage = "通用"
     @AppStorage("jx3CompactHome", store: UserDefaults(suiteName: suiteName))
     private var compactJX3Home = false
+    @AppStorage("libraryPresentation", store: UserDefaults(suiteName: suiteName))
+    private var libraryPresentation = "grid"
 
     @State private var bottles: [URL] = []
     @State private var progress: Double = 0
@@ -54,6 +56,7 @@ struct OptionsView: View {
     @EnvironmentObject private var modeStore: ArclumeModeStore
     @EnvironmentObject private var updateService: ArclumeUpdateService
     @MainActor var load: @Sendable () async -> Void
+    var onShowWelcome: (() -> Void)? = nil
 
     private var isOnlineMode: Bool {
         modeStore.selectedMode?.isOnlineGameMode == true
@@ -153,7 +156,7 @@ struct OptionsView: View {
         if !isOnlineMode {
             pages += [("运行时", "shippingbox"), ("游戏库", "square.stack")]
         }
-        return pages + [("更新", "arrow.triangle.2.circlepath"), ("关于", "info.circle")]
+        return pages + [("更新", "arrow.triangle.2.circlepath"), ("重置", "arrow.counterclockwise"), ("关于", "info.circle")]
     }
 
     private var settingsContent: some View {
@@ -217,9 +220,12 @@ struct OptionsView: View {
                         updateCard
                     case "关于":
                         aboutCard
+                    case "重置":
+                        settingsCard { ArclumeResetView() }
                     default:
-                        modeSelectionCard
                         appearanceCard
+                        settingsCard { WineWarmupOption() }
+                        settingsCard { MicrophonePermissionView() }
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -267,6 +273,16 @@ struct OptionsView: View {
         settingsCard {
             Text("外观")
                 .font(.headline)
+            Picker("启动界面", selection: $libraryPresentation) {
+                Text("游戏库").tag("grid")
+                Text("启动器").tag("launcher")
+            }
+            .pickerStyle(.segmented)
+            if let onShowWelcome {
+                Button("重新查看使用引导", systemImage: "sparkles", action: onShowWelcome)
+            }
+            Text("两种样式使用同一游戏库和容器，切换外观不会改变游戏配置。")
+                .font(.footnote).foregroundStyle(.secondary)
 
             if isOnlineMode {
                 HStack(spacing: 12) {
@@ -507,14 +523,7 @@ struct OptionsView: View {
     }
 
     private var applicationVersion: String {
-        let info = Bundle.main.infoDictionary
-        let marketingVersion = info?["CFBundleShortVersionString"] as? String ?? "未知版本"
-        guard let buildVersion = info?["CFBundleVersion"] as? String,
-              buildVersion != marketingVersion
-        else {
-            return marketingVersion
-        }
-        return "\(marketingVersion) (\(buildVersion))"
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "未知版本"
     }
 
     private var standardRuntimeSection: some View {
@@ -527,7 +536,7 @@ struct OptionsView: View {
         }
         .help(
             standardGameRuntime == .bundledWine
-                ? "普通 Windows 游戏使用 Arclume Wine 与独立 Steam 容器，不需要 CrossOver。"
+                ? "Windows 应用共用 ALBottles；Steam 可按需安装，不需要 CrossOver。"
                 : "普通 Windows 游戏使用你选择的 CrossOver Bottle。"
         )
     }
@@ -535,7 +544,7 @@ struct OptionsView: View {
     private var bundledSteamPrefixSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Steam 容器").font(.headline)
+                Text("ALBottles · 统一 Windows 容器").font(.headline)
                 Spacer()
                 Text("64 位").font(.caption).foregroundStyle(.secondary)
             }
@@ -546,10 +555,12 @@ struct OptionsView: View {
             } else if BundledWineRuntime.isValidPrefix(at: BundledWineRuntime.standardSteamPrefixURL) {
                 steamInstallationSection
             } else {
+                WineWarmupOption(showsStatus: false)
                 HStack {
                     Text("尚未创建").font(.subheadline).foregroundStyle(.secondary)
                     Spacer()
-                    Button("创建并安装 Steam") { prepareBundledSteamPrefix() }
+                    Button("创建容器") { prepareBundledSteamPrefix(installSteam: false) }
+                    Button("创建并安装 Steam") { prepareBundledSteamPrefix(installSteam: true) }
                         .buttonStyle(.borderedProminent)
                         .disabled(containerSteamStore.steamSetupBusy)
                 }
@@ -912,7 +923,7 @@ struct OptionsView: View {
         }
     }
 
-    private func prepareBundledSteamPrefix() {
+    private func prepareBundledSteamPrefix(installSteam: Bool = false) {
         guard !preparingBundledSteamPrefix, !containerSteamStore.steamSetupBusy else { return }
         preparingBundledSteamPrefix = true
         bundledSteamProgress = 0.01
@@ -942,7 +953,7 @@ struct OptionsView: View {
                 )
                 syncStandardSteamState(for: prefixURL, loadAfterSync: true)
                 bundledSteamProgress = nil
-                beginSteamInstallation(in: prefixURL, using: .bundledWine)
+                if installSteam { beginSteamInstallation(in: prefixURL, using: .bundledWine) }
             } catch {
                 containerSteamStore.errorMessage = error.localizedDescription
             }

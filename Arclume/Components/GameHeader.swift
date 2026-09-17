@@ -10,12 +10,17 @@ import SwiftUI
 struct GameHeader: View {
     @Binding var game: Game?
     @Binding var showDetailView: Bool
+    var overlaysPoster = false
+    var launcherStyle = false
+    var onLauncherStart: (() -> Void)? = nil
+    var onLauncherStop: (() -> Void)? = nil
     @EnvironmentObject var appGlobals: AppGlobals
     @EnvironmentObject var libraryPageGlobals: LibraryPageGlobals
     @EnvironmentObject var gameOptions: GameOptions
     @EnvironmentObject var compatibilityStore: GameCompatibilityStore
     @EnvironmentObject var nativeRuntimeStore: NativeAppRuntimeStore
     @State private var showGameOptions: Bool = false
+    @State private var showEditor = false
     var isPlaying: Bool {
         if game!.isNative {
             return nativeRuntimeStore.isActive(gameID: game!.id)
@@ -53,124 +58,160 @@ struct GameHeader: View {
     }
     
     var body: some View {
-        HStack (alignment: .bottom) {
-            VStack(alignment: .leading){
-                Text(displayName).font(.largeTitle.bold())
-                if !game!.developers.joined(separator: ", ").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(developers).font(.footnote)
-                }
-                if !game!.publishers.joined(separator: ", ").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(publishers).font(.footnote)
-                }
-            }
-            HStack(alignment: .center) {
-                if(game!.downloadProgress == 100 && game!.isInstalled) {
-                    PlayButtonExtras(playAction: playGame,
-                    stopAction: {
-                        if game!.isNative {
-                            nativeRuntimeStore.stop(gameID: game!.id)
-                        } else if OnlineGameMode.isJX3(game!) {
-                            forceQuitJX3Game()
-                        } else {
-                            Task {
-                                do { try await closeWineActivities() }
-                                catch { libraryPageGlobals.wineStopErrorMessage = error.localizedDescription }
-                                libraryPageGlobals.playingID = nil
-                            }
-                        }
-                    }, optionsAction: isDirectNativeApplication ? nil : {
-                        showGameOptions = true
-                    }, editAction: game!.isCustom == true ? {
-                        libraryPageGlobals.openCustomGameEditor(for: game)
-                    } : nil, folderAction: {
-                        if let meta = getMeta(libraryPageGlobals.gamesMeta, byID: String(game!.id)) {
-                            showFolder(url: meta.gameURL!)
-                        } else if game!.appExeURL != nil {
-                            showFolder(url: game!.appExeURL!.deletingLastPathComponent())
-                        }
-                    }, isPlaying: isPlaying)
-                }
-            Spacer()
-            
-                HStack{
-                    if(game!.isNative == true) {
-                        Image(systemName: "apple.logo")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 20)
-                            .foregroundStyle(.white)
-                        
-                    }
-                    if(game!.controllerSupport == "full") {
-                        Image(systemName: "gamecontroller.circle.fill")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 20)
-                            .foregroundStyle(.white)
-                        
-                    }
-                }
-                HStack(alignment: .center){
-                    Text(L10n.string("Available for:"))
-                    if hasOfficialMacSupport {
-                        Image("os-apple")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 20)
-                            .help(L10n.string("Native macOS support"))
-                    } else if hasCrossOverMacSupport {
-                        ZStack(alignment: .bottomTrailing) {
-                            Image("os-apple")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 20)
-
-                            Image("crossover-fill")
-                                .resizable()
-                                .scaledToFit()
-                                .frame(width: 9, height: 9)
-                                .padding(2)
-                                .foregroundStyle(.white)
-                                .background(.black.opacity(0.85), in: Circle())
-                                .offset(x: 5, y: 4)
-                        }
-                        .help(L10n.string("Available on macOS through CrossOver"))
-                    }
-                    if (game!.platforms.linux) {
-                        Image("os-linux")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 20)
-                    }
-                    if (game!.platforms.windows) {
-                        Image("os-win")
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 20)
-                    }
-                }
-                .padding(.vertical, 10)
-                .padding(.horizontal, 30)
-                .background(.clear)
-                .overlay(
-                    Capsule()
-                        .stroke(.white, lineWidth: 2)
-                )
-                .clipShape(.capsule)
-            }
+        Group {
+            if launcherStyle { launcherControls }
+            else { detailControls }
         }
-        .foregroundStyle(.white)
         .sheet(isPresented: $showGameOptions) {
-            Modal(
-                L10n.format("Options for %@", displayName),
-                showModal: $showGameOptions,
-                subdued: true
-            ) {
+            Modal(L10n.format("Options for %@", displayName), showModal: $showGameOptions, subdued: true) {
                 GameOptionsView(game: $game)
             }
         }
+        .sheet(isPresented: $showEditor) {
+            Modal(L10n.string("Custom Game Editor"), showModal: $showEditor, subdued: true) {
+                CustomGameView(isPresented: $showEditor, initialGameID: game?.id)
+            }
+        }
     }
-    
+
+    private var launcherControls: some View {
+        HStack(spacing: 10) {
+            Button {
+                if isPlaying {
+                    if let onLauncherStop { onLauncherStop() } else { stopGame() }
+                } else {
+                    if let onLauncherStart { onLauncherStart() } else { playGame() }
+                }
+            } label: {
+                HStack(spacing: 10) {
+                    if libraryPageGlobals.isLaunchingGame { ProgressView().controlSize(.small) }
+                    else { Image(systemName: isPlaying ? "stop.fill" : "play.fill") }
+                    Text(libraryPageGlobals.isLaunchingGame ? "正在启动…" : isPlaying ? "停止运行" : game?.isInstalled == true ? "开始游戏" : "尚未安装")
+                }
+                .font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 32)
+            }
+            .buttonStyle(.glassProminent)
+            .disabled(libraryPageGlobals.isStoppingWine || libraryPageGlobals.isLaunchingGame || game?.isInstalled != true || game?.downloadProgress != 100)
+            .accessibilityIdentifier("launcher.primaryAction")
+            Menu {
+                if !isDirectNativeApplication {
+                    Button { showGameOptions = true } label: {
+                        Label("运行设置…", systemImage: "slider.horizontal.3")
+                    }
+                }
+                if game?.isCustom == true {
+                    Button { showEditor = true } label: {
+                        Label("编辑项目信息…", systemImage: "pencil")
+                    }
+                }
+                Button(action: revealInstallation) {
+                    Label("打开安装目录", systemImage: "folder")
+                }.disabled(installationDirectory == nil)
+            } label: {
+                Image(systemName: "ellipsis").frame(minHeight: 32)
+            }
+            .menuIndicator(.hidden)
+            .buttonStyle(.glass)
+            .help("更多操作")
+            .accessibilityLabel("更多操作")
+            .accessibilityIdentifier("launcher.more")
+        }
+        .controlSize(.large)
+    }
+
+    private var detailControls: some View {
+        HStack(alignment: .center, spacing: 24) {
+            HStack(spacing: 10) {
+                if game!.downloadProgress == 100 && game!.isInstalled {
+                    Button(action: { isPlaying ? stopGame() : playGame() }) {
+                        Label(isPlaying ? L10n.string("Stop") : "启动",
+                              systemImage: isPlaying ? "stop.fill" : "play.fill")
+                            .font(.headline)
+                            .frame(minWidth: 100, minHeight: 26)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Color.accentColor)
+                    .disabled(libraryPageGlobals.isStoppingWine)
+                    .accessibilityIdentifier("gameDetail.primaryAction")
+                }
+            }
+            .controlSize(.large)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(displayName)
+                    .font(.title2.bold())
+                    .lineLimit(2)
+                    .textSelection(.enabled)
+                Label(game!.isNative ? "macOS" : "Windows", systemImage: game!.isNative ? "apple.logo" : "desktopcomputer")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 10) {
+                if !isDirectNativeApplication {
+                    Button { showGameOptions = true } label: {
+                        Image(systemName: "slider.horizontal.3")
+                    }
+                    .help("运行设置")
+                    .accessibilityLabel("运行设置")
+                    .accessibilityIdentifier("gameDetail.options")
+                }
+                Menu {
+                    if game!.isCustom == true {
+                        Button { showEditor = true } label: {
+                            Label("编辑项目信息…", systemImage: "pencil")
+                        }
+                    }
+                    Button(action: revealInstallation) {
+                        Label("打开安装目录", systemImage: "folder")
+                    }
+                    .disabled(installationDirectory == nil)
+                    .accessibilityIdentifier("gameDetail.installationDirectory")
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .help("更多操作")
+                .accessibilityLabel("更多操作")
+
+                if game!.controllerSupport == "full" {
+                    Image(systemName: "gamecontroller").help("支持控制器")
+                }
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.regular)
+            .fixedSize()
+        }
+    }
+
+    private var installationDirectory: URL? {
+        guard let game else { return nil }
+        if let meta = getMeta(libraryPageGlobals.gamesMeta, byID: String(game.id)),
+           let url = meta.gameURL, FileManager.default.fileExists(atPath: url.path) {
+            return url
+        }
+        return LibraryProgramLocation.directory(for: game)
+    }
+
+    private func revealInstallation() {
+        guard let url = installationDirectory else { return }
+        showFolder(url: url)
+    }
+
+    private func stopGame() {
+        guard let game else { return }
+        if game.isNative {
+            nativeRuntimeStore.stop(gameID: game.id)
+        } else if OnlineGameMode.isJX3(game) {
+            forceQuitJX3Game()
+        } else {
+            Task {
+                do { try await closeWineActivities() }
+                catch { libraryPageGlobals.wineStopErrorMessage = error.localizedDescription }
+                libraryPageGlobals.playingID = nil
+            }
+        }
+    }
+
     @MainActor
     func playGame() {
         guard !isPlaying, !libraryPageGlobals.isStoppingWine else { return }

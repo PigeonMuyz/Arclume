@@ -9,6 +9,23 @@
 #include <stdio.h>
 #include <wchar.h>
 #include <string.h>
+#ifdef YY_LAUNCH_SUPPORT
+#include <shellapi.h>
+#include <tlhelp32.h>
+
+static BOOL yy_already_running(void) {
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return TRUE;
+    PROCESSENTRY32W entry = { .dwSize = sizeof(entry) };
+    BOOL found = FALSE;
+    if (!Process32FirstW(snapshot, &entry)) found = TRUE;
+    else do {
+        if (!_wcsicmp(entry.szExeFile, L"YY.exe") || !_wcsicmp(entry.szExeFile, L"yyexternal.exe")) { found = TRUE; break; }
+    } while (Process32NextW(snapshot, &entry));
+    CloseHandle(snapshot);
+    return found;
+}
+#endif
 
 static const BYTE before[] = {0xe9,0x4b,0x90,0xff,0xff,0xcc};
 /* installHttpDnsResolver(): return -1 (existing failure result), cdecl ret. */
@@ -61,7 +78,7 @@ static BOOL checked_write(HANDLE process, BYTE *address, const BYTE *expected, c
 
 static BOOL patch(HANDLE process, BYTE *address) { return checked_write(process, address, before, after, sizeof(before)); }
 
-static const struct {
+static struct {
     const wchar_t *path;
     BYTE sha256[32];
 } osr_modules[] = {
@@ -70,6 +87,16 @@ static const struct {
     {L"C:\\users\\crossover\\AppData\\Roaming\\duowan\\yy\\yycomstore\\2052\\com.yy.cefdev2\\131389\\yycefdev2.dll",
      {0x7e,0xfd,0x63,0x00,0x50,0x6a,0xcf,0x02,0x9d,0xbf,0x7f,0x68,0xad,0xf9,0x47,0x9e,0x18,0xc5,0xda,0xfa,0xd0,0x8e,0x1a,0x89,0x55,0x28,0xf3,0x09,0x59,0x0b,0x6e,0xc7}}
 };
+
+/* Resolve the known downloaded component for this prefix's Windows user. */
+static BOOL initialize_osr_path(void) {
+    static wchar_t path[2048];
+    DWORD count = GetEnvironmentVariableW(L"APPDATA", path, 1800);
+    if (!count || count >= 1800 || count < 3 || path[1] != L':' || path[2] != L'\\') return FALSE;
+    wcscat(path, L"\\duowan\\yy\\yycomstore\\2052\\com.yy.cefdev2\\131389\\yycefdev2.dll");
+    osr_modules[1].path = path;
+    return TRUE;
+}
 
 static int osr_module(const wchar_t *path) {
     for (unsigned i = 0; i < sizeof(osr_modules)/sizeof(osr_modules[0]); ++i)
@@ -246,7 +273,12 @@ static unsigned mode_flags(const wchar_t *arg) {
 
 int wmain(int argc, wchar_t **argv) {
     setvbuf(stdout, NULL, _IONBF, 0);
+#ifdef YY_LAUNCH_SUPPORT
+    /* The shipping helper cannot enable inspection ports or diagnostic modes. */
+    if (argc != 2 || (wcscmp(argv[1], L"--run-in-process-gpu") && wcscmp(argv[1], L"--self-test"))) return 2;
+#endif
     if (argc != 2 || mode_flags(argv[1]) == MODE_INVALID) return 2;
+    if (!initialize_osr_path()) return 4;
     unsigned flags = mode_flags(argv[1]);
     BOOL osr_cpu = !!(flags & MODE_OSR_CPU);
     BOOL disable_webgl = !!(flags & MODE_NO_WEBGL);
@@ -303,6 +335,12 @@ int wmain(int argc, wchar_t **argv) {
         printf("YYPROBE self-test %s\n", ok ? "PASS" : "FAIL");
         return ok ? 0 : 3;
     }
+#ifdef YY_LAUNCH_SUPPORT
+    HANDLE singleton = CreateMutexW(NULL, FALSE, L"Local\\ArclumeYY958LaunchSupport");
+    if (!singleton || GetLastError() == ERROR_ALREADY_EXISTS || yy_already_running()) {
+        puts("YYPROBE REFUSED: exit the existing YY session before launching"); return 7;
+    }
+#endif
     HANDLE verified = CreateFileW(dll, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
     if (verified == INVALID_HANDLE_VALUE || !hash_matches(verified)) { puts("YYPROBE REFUSED: DLL SHA256 mismatch"); return 4; }
     if (osr_cpu && !SetEnvironmentVariableW(L"cef_osr_gpu", L"0")) { CloseHandle(verified); return 4; }
@@ -315,7 +353,11 @@ int wmain(int argc, wchar_t **argv) {
         printf("YYPROBE launch failed %lu\n", GetLastError()); CloseHandle(verified); return 5;
     }
     /* Inspection must not leave a privileged debug endpoint after this probe exits. */
-    if (!DebugSetProcessKillOnExit(inspect)) {
+    BOOL kill_on_exit = inspect;
+#ifdef YY_LAUNCH_SUPPORT
+    kill_on_exit = TRUE;
+#endif
+    if (!DebugSetProcessKillOnExit(kill_on_exit)) {
         TerminateProcess(pi.hProcess, 1);
         CloseHandle(pi.hThread); CloseHandle(pi.hProcess); CloseHandle(verified);
         puts("YYPROBE refused: cannot configure debugger exit policy"); return 5;
@@ -357,7 +399,10 @@ int wmain(int argc, wchar_t **argv) {
                 }
             }
             if (event.u.CreateProcessInfo.hFile) CloseHandle(event.u.CreateProcessInfo.hFile);
+            if (event.u.CreateProcessInfo.hThread) CloseHandle(event.u.CreateProcessInfo.hThread);
             printf("YYPROBE child pid=%lu\n", event.dwProcessId);
+        } else if (event.dwDebugEventCode == CREATE_THREAD_DEBUG_EVENT) {
+            if (event.u.CreateThread.hThread) CloseHandle(event.u.CreateThread.hThread);
         } else if (event.dwDebugEventCode == LOAD_DLL_DEBUG_EVENT) {
             HANDLE file = event.u.LoadDll.hFile;
             wchar_t path[2048] = {0};
@@ -369,6 +414,13 @@ int wmain(int argc, wchar_t **argv) {
                 if (ok) ++patched; else failed = TRUE;
             }
             int osr_index = len && len < 2048 ? osr_module(name) : -1;
+#ifdef YY_LAUNCH_SUPPORT
+            /* A downloaded replacement is not implicitly a supported patch target. */
+            const wchar_t *basename = wcsrchr(name, L'\\');
+            if (osr_cpu && basename && !_wcsicmp(basename + 1, L"yycefdev2.dll") && osr_index < 0) {
+                puts("YYPROBE REFUSED: unsupported OSR component"); failed = TRUE;
+            }
+#endif
             if (osr_cpu && osr_index >= 0) {
                 BOOL ok = child && hash_expected(file, 48800, osr_modules[osr_index].sha256) &&
                     patch_osr(child->process, (BYTE *)event.u.LoadDll.lpBaseOfDll);
@@ -384,23 +436,46 @@ int wmain(int argc, wchar_t **argv) {
             if (child && child->cef_candidate && !child->cef_applied && status == DBG_CONTINUE) {
                 child->cef_applied = cef_arguments(child->process, disable_webgl, child->debug_port, in_process_gpu);
                 printf("YYPROBE CEF_ARGS_%s pid=%lu stage=breakpoint\n", child->cef_applied ? "APPLIED" : "REFUSED", child->pid);
+#ifdef YY_LAUNCH_SUPPORT
+                if (!child->cef_applied) failed = TRUE;
+#endif
             }
             if (!event.u.Exception.dwFirstChance) {
                 printf("YYPROBE UNHANDLED pid=%lu code=%08lx address=%p\n", event.dwProcessId, code, event.u.Exception.ExceptionRecord.ExceptionAddress);
                 if (child) exception_details(child->process, event.dwThreadId, &event.u.Exception.ExceptionRecord);
+#ifdef YY_LAUNCH_SUPPORT
+                failed = TRUE;
+#endif
             }
         } else if (event.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT) {
             printf("YYPROBE exit pid=%lu code=%08lx\n", event.dwProcessId, event.u.ExitProcess.dwExitCode);
-            if (child) { memset(child, 0, sizeof(*child)); --live; }
+            if (child) { CloseHandle(child->process); memset(child, 0, sizeof(*child)); --live; }
         }
         if (!ContinueDebugEvent(event.dwProcessId, event.dwThreadId, status)) { failed = TRUE; break; }
+#ifdef YY_LAUNCH_SUPPORT
+        if (failed) break;
+#endif
         if (!live) break;
     }
     for (unsigned i = 0; i < 128; ++i) if (children[i].pid) {
-        if (inspect) TerminateProcess(children[i].process, 1);
+        if (kill_on_exit) TerminateProcess(children[i].process, 1);
         else DebugActiveProcessStop(children[i].pid);
+        CloseHandle(children[i].process);
     }
     CloseHandle(verified);
     printf("YYPROBE complete patches=%u failed=%d\n", patched, failed);
     return failed || !patched ? 6 : 0;
 }
+
+#ifdef YY_LAUNCH_SUPPORT
+/* GUI subsystem: no console is allocated for a normal Arclume launch. */
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command, int show) {
+    (void)instance; (void)previous; (void)command; (void)show;
+    int argc = 0;
+    wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (!argv) return 2;
+    int result = wmain(argc, argv);
+    LocalFree(argv);
+    return result;
+}
+#endif

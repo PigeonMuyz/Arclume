@@ -27,15 +27,25 @@ var api = SteamAPI()
 
 @main
 struct ArclumeApp: App {
+    @NSApplicationDelegateAdaptor(ArclumeAppDelegate.self) private var appDelegate
     @StateObject private var appSettings: AppSettings
     @StateObject private var updateService: ArclumeUpdateService
+    private let resetError: String?
 
     init() {
+        var failure: String?
         if !ArclumeTestEnvironment.isTesting {
-            migrateLegacyProcyonDataIfNeeded()
-            migrateLegacyDefaultsIfNeeded()
-            migrateUnavailableConfiguredMetadataSourceIfNeeded()
+            do {
+                try ArclumeResetService.performPendingReset()
+                migrateLegacyProcyonDataIfNeeded()
+                LegacyBottleDirectory.removeEmptyDirectory(in: ARCLUME_SUPPORT_FOLDER_URL)
+                migrateLegacyDefaultsIfNeeded()
+                migrateUnavailableConfiguredMetadataSourceIfNeeded()
+            } catch {
+                failure = error.localizedDescription
+            }
         }
+        resetError = failure
         _appSettings = StateObject(wrappedValue: AppSettings())
         _updateService = StateObject(wrappedValue: ArclumeUpdateService())
     }
@@ -64,17 +74,26 @@ struct ArclumeApp: App {
     }
     @ViewBuilder
     private var appContent: some View {
+        if let resetError {
+            VStack(spacing: 16) {
+                Text("重置尚未完成").font(.title2)
+                Text(resetError)
+                Text("请退出其他 Wine / CrossOver 程序，检查目录权限后重新打开 Arclume。为保护数据，本次未加载游戏库；已移入废纸篓的数据可恢复。")
+                Button("退出") { NSApp.terminate(nil) }
+            }.padding(32).frame(width: 580)
+        } else {
         #if DEBUG
         if ArclumeTestEnvironment.isUIFixture {
             ArclumeUITestRootView()
         } else if ArclumeTestEnvironment.isTesting {
             Text("Arclume Core Tests")
         } else {
-            ContentView()
+            UnifiedContainerGate { ContentView() }
         }
         #else
-        ContentView()
+        UnifiedContainerGate { ContentView() }
         #endif
+        }
     }
 
 }

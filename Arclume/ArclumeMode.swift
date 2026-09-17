@@ -69,7 +69,7 @@ enum ArclumeMode: String, CaseIterable, Hashable, Identifiable, Sendable {
     }
 
     var isOnlineGameMode: Bool {
-        self == .jx3
+        false // Retained only for decoding old preferences, not a product mode.
     }
 
     static var persisted: Self? {

@@ -11,7 +11,7 @@ nonisolated let suiteName = ArclumeTestEnvironment.isTesting
     ? ArclumeTestEnvironment.defaultsSuite : "group.io.github.pigeonmuyz.arclume"
 private let legacyProcyonSuiteName = "group.io.github.pigeonmuyz.procyonplus"
 private let legacyCodexForkSuiteName = "group.com.codex.procyonfork"
-private let legacyMigrationKey = "didMigrateArclumeDefaults.v1"
+private let legacyMigrationKey = ArclumeResetService.legacyDefaultsKey
 
 func migrateLegacyDefaultsIfNeeded() {
     guard let defaults = UserDefaults(suiteName: suiteName),
@@ -49,9 +49,9 @@ func resolvePersistedFolders() -> [URL] {
         if let url = try? URL(resolvingBookmarkData: data,
                               options: [.withSecurityScope],
                               relativeTo: nil,
-                              bookmarkDataIsStale: &isStale),
-           !isStale {
-            urls.append(url)
+                              bookmarkDataIsStale: &isStale) {
+            let mapped = UnifiedContainerMigration(root: ARCLUME_SUPPORT_FOLDER_URL).canonicalURL(url)
+            if !isStale || mapped != url { urls.append(mapped) }
         }
     }
     return urls

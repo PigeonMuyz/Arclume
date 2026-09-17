@@ -40,7 +40,7 @@ struct GameCardPresentationEditor: View {
     }
 
     private var editorTitle: String {
-        isJX3 ? "编辑剑网3卡片" : "编辑卡片"
+        isJX3 && OnlineGameMode.isEnabled ? "编辑剑网3卡片" : "编辑卡片"
     }
 
     init(

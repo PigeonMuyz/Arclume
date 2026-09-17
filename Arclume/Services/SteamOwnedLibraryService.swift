@@ -5,12 +5,12 @@
 
 import Foundation
 
-struct SteamOwnedLibraryScanResult: Equatable {
+nonisolated struct SteamOwnedLibraryScanResult: Equatable, Sendable {
     let appIDs: [String]
     let didReadAllRoots: Bool
 }
 
-struct SteamOwnedLibraryService {
+nonisolated struct SteamOwnedLibraryService {
     static let steamID64AccountOffset: UInt64 = 76_561_197_960_265_728
 
     private let fileManager: FileManager

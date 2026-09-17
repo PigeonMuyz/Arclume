@@ -13,6 +13,7 @@ struct LibraryTitlebar: ToolbarContent {
 
     var load: @Sendable () async -> Void
     let isOnlineMode: Bool
+    var isLauncherPresentation = false
 
     private var filteredGames: [Game] {
         libraryPageGlobals.filteredGames { game in
@@ -98,18 +99,31 @@ struct LibraryTitlebar: ToolbarContent {
                 .accessibilityIdentifier("library-settings-button")
             }
         } else {
+            if isLauncherPresentation {
+                ToolbarItemGroup(placement: .primaryAction) {
+                    ArclumeLibraryActions(compactIcons: true)
+                        .labelStyle(.iconOnly)
+                        .controlSize(.regular)
+                }
+                ToolbarSpacer(.fixed, placement: .primaryAction)
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     libraryPageGlobals.showOptions = true
                 } label: {
-                    Label(L10n.string("Options"), systemImage: "gearshape")
-                        .labelStyle(.iconOnly)
+                    if isLauncherPresentation {
+                        LauncherToolbarIcon(symbol: "gearshape")
+                            .accessibilityLabel(L10n.string("Options"))
+                    } else {
+                        Label(L10n.string("Options"), systemImage: "gearshape")
+                            .labelStyle(.iconOnly)
+                    }
                 }
                 .help(L10n.string("Options"))
                 .accessibilityIdentifier("library-settings-button")
             }
         }
-        if !isOnlineMode {
+        if !isOnlineMode && !isLauncherPresentation {
             ToolbarItem(placement: .secondaryAction) {
                 Button {
                     api.deleteOwnedGamesIDsCache()
@@ -135,7 +149,7 @@ struct LibraryTitlebar: ToolbarContent {
                 .accessibilityIdentifier("stop-wine-button")
             }
         }
-        if !isOnlineMode {
+        if !isOnlineMode && !isLauncherPresentation {
             ToolbarItemGroup(placement: .secondaryAction) {
                 standardToolbarControls
             }
@@ -204,7 +218,7 @@ struct LibraryTitlebar: ToolbarContent {
             HStack {
                 Image(systemName: "line.3.horizontal.decrease.circle")
                 Picker(L10n.string("Filter"), selection: $libraryPageGlobals.libraryFilter) {
-                    ForEach(LibraryFilter.allCases) { option in
+                    ForEach([LibraryFilter.installed, .all]) { option in
                         Text(option.title).tag(option)
                     }
                 }

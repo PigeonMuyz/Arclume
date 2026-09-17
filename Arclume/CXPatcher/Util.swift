@@ -15,12 +15,6 @@ private let legacyProcyonLogsFolderURL = FileManager.default.urls(for: .libraryD
 
 let ARCLUME_SUPPORT_FOLDER_URL = applicationSupportDirectoryURL.appendingPathComponent("Arclume", isDirectory: true)
 let PATCHED_CX_APPNAME = "Crossover_patched.app"
-private let DEFAULT_CXP_BOTTLES_ROOTPATH = "/Users/${USER}/"
-let DEFAULT_CXP_BOTTLES_FOLDER = "CXPBottles"
-//private let DEFAULT_CXP_BOTTLES_ROOTPATH = "/Users/${USER}/Application Support/Procyon/"
-//private let DEFAULT_CXP_BOTTLES_FOLDER = "Bottles"
-//private let DEFAULT_CXP_BOTTLES_PATH = DEFAULT_CXP_BOTTLES_ROOTPATH + DEFAULT_CXP_BOTTLES_FOLDER
-private let DEFAULT_CXP_BOTTLES_PATH = ARCLUME_SUPPORT_FOLDER_URL.appendingPathComponent(DEFAULT_CXP_BOTTLES_FOLDER).path(percentEncoded: false)
 private let CROSSOVER_MAIN_CONFIGURATION = "/etc/CrossOver.conf"
 private let WINE_RESOURCES_ROOT = "Crossover"
 let SHARED_SUPPORT_COMPONENT = "Contents/SharedSupport/CrossOver"
@@ -34,6 +28,7 @@ let OSVersion = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
 /// filesystem rename. If an Arclume directory already exists, only missing
 /// top-level entries are moved; conflicting entries are left untouched.
 func migrateLegacyProcyonDataIfNeeded() {
+    guard UserDefaults(suiteName: suiteName)?.bool(forKey: ArclumeResetService.skipLegacyDataKey) != true else { return }
     migrateLegacyDirectory(
         from: legacyProcyonSupportFolderURL,
         to: ARCLUME_SUPPORT_FOLDER_URL
@@ -163,10 +158,10 @@ struct GlobalEnvs {
 }
 
 struct Opts {
-    var overrideBottlePath: Bool = true
+    var overrideBottlePath: Bool = false
     var copyGptk = false
     var patchGStreamer = true
-    var cxbottlesPath = DEFAULT_CXP_BOTTLES_PATH
+    var cxbottlesPath = getCXDefaultBottlesURL().path(percentEncoded: false)
     var selectedPrefix: String = ""
     var patchMVK: PatchMVK = PatchMVK.none
     var autoUpdateDisable = true
@@ -318,6 +313,7 @@ private func addEnvs(_ envs: [Env], to: URL, from: URL) {
 }
 
 func addGlobals(appURL: URL, opts: Opts) {
+    guard opts.overrideBottlePath else { return }
     disable(dest: appURL.path + SHARED_SUPPORT_PATH + CROSSOVER_MAIN_CONFIGURATION)
     let envs: [Env] = [Env(key: "CX_BOTTLE_PATH", value: opts.cxbottlesPath)] // other envs to be added later
     

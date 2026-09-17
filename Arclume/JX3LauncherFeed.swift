@@ -372,6 +372,7 @@ struct JX3LauncherHomeView: View {
     let onStop: (() -> Void)?
     let onFeedUpdated: ((JX3LauncherFeed) -> Void)?
     let showsCloseButton: Bool
+    var embeddedDetail: Bool = false
 
     @Environment(\.openURL) private var openURL
     @EnvironmentObject private var appGlobals: AppGlobals
@@ -383,6 +384,8 @@ struct JX3LauncherHomeView: View {
     @State private var selectedCarouselID: String?
     @State private var carouselSelectionStartedAt = Date()
     @State private var showsCompactNotices = false
+    @State private var detailNewsSelected = false
+    @State private var showsDetailRuntimeSettings = false
     @AppStorage("jx3CompactHome", store: UserDefaults(suiteName: suiteName))
     private var compactHomeEnabled = false
 
@@ -423,17 +426,19 @@ struct JX3LauncherHomeView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if compactHomeEnabled {
+            if showsCloseButton || embeddedDetail {
+                officialDetailHome
+            } else if compactHomeEnabled {
                 compactHome
             } else {
                 expandedHome
             }
         }
-        .preference(key: JX3CompactHomePreferenceKey.self, value: compactHomeEnabled && !showsCloseButton)
+        .preference(key: JX3CompactHomePreferenceKey.self, value: compactHomeEnabled && !showsCloseButton && !embeddedDetail)
         .task(id: compactHomeEnabled) {
             loadJX3Options()
             if feed == nil { feed = JX3LauncherFeedStore.cachedFeed() }
-            if !compactHomeEnabled { await refreshFeed() }
+            if showsCloseButton || embeddedDetail || !compactHomeEnabled { await refreshFeed() }
         }
         .onDisappear { persistJX3Options() }
         .onChange(of: feed?.carousel.map(\.id)) { _, carouselIDs in
@@ -441,6 +446,98 @@ struct JX3LauncherHomeView: View {
             guard carouselIDs?.contains(selectedCarouselID) != true else { return }
             self.selectedCarouselID = nil
             carouselSelectionStartedAt = Date()
+        }
+    }
+
+    /// Library detail follows the official launcher's composition without changing
+    /// the dedicated home screen or the existing launch/settings handlers.
+    private var officialDetailHome: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Color(red: 0.04, green: 0.09, blue: 0.12)
+                if let artwork = fallbackArtworkURL ?? feed?.carousel.first?.thumbnailURL {
+                    KFImage(artwork)
+                        .placeholder { launcherArtworkFallback }
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .clipped()
+                        .allowsHitTesting(false)
+                }
+                LinearGradient(
+                    colors: [.black.opacity(0.12), .black.opacity(0.08), .black.opacity(0.8)],
+                    startPoint: .top, endPoint: .bottom
+                )
+                .allowsHitTesting(false)
+                HStack(alignment: .bottom, spacing: 32) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Spacer()
+                        Text("剑网3").font(.system(size: 48, weight: .bold, design: .serif))
+                        Text("旗舰版").font(.title3).foregroundStyle(.white.opacity(0.8))
+                        Text("西山居 · Windows 游戏")
+                            .font(.caption).foregroundStyle(.white.opacity(0.6))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(spacing: 14) {
+                        hero
+                            .frame(height: 156)
+                            .contentShape(Rectangle())
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                        VStack(spacing: 12) {
+                            Picker("官方消息", selection: $detailNewsSelected) {
+                                Text("公告").tag(false)
+                                Text("资讯与活动").tag(true)
+                            }
+                            .pickerStyle(.segmented)
+                            ScrollView {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    if let feed {
+                                        if detailNewsSelected {
+                                            let articles = feed.news + feed.activities
+                                            ForEach(articles) { article in articleRow(article) }
+                                            if articles.isEmpty { emptyFeedMessage }
+                                        } else {
+                                            ForEach(feed.notices) { notice in
+                                                feedRow(title: notice.title, subtitle: notice.dateText, url: notice.detailURL)
+                                            }
+                                            if feed.notices.isEmpty { emptyFeedMessage }
+                                        }
+                                    } else {
+                                        Text(isRefreshing ? "正在获取官方消息…" : "暂时无法获取官方消息")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            HStack {
+                                Text("官方资讯").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Button { Task { await refreshFeed() } } label: {
+                                    Image(systemName: "arrow.clockwise")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("刷新官方资讯")
+                                .disabled(isRefreshing)
+                            }
+                        }
+                        .padding(16)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        launchSettingsColumn
+                    }
+                    .frame(width: 310)
+                    .padding(.top, 40)
+                }
+                .padding(28)
+                if showsCloseButton { VStack {
+                    header
+                    Spacer()
+                }
+                .padding(16)
+                }
+            }
+            .foregroundStyle(.white)
+            .environment(\.colorScheme, .dark)
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
         }
     }
 
@@ -507,9 +604,12 @@ struct JX3LauncherHomeView: View {
                         header
                             .frame(height: headerHeight)
                             .padding(.bottom, 14)
+                            .zIndex(1)
                     }
                     hero
                         .frame(width: contentWidth, height: heroHeight)
+                        // Image clipping alone must not leave an oversized hit area.
+                        .contentShape(Rectangle())
                         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
                         .clipped()
                     lowerContent(for: contentWidth)
@@ -542,6 +642,9 @@ struct JX3LauncherHomeView: View {
                     .background(.white.opacity(0.12), in: Circle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("关闭启动器页面")
+            .accessibilityIdentifier("jx3-launcher-home-close")
+            .keyboardShortcut(.cancelAction)
 
         }
         .foregroundStyle(.white)
@@ -712,16 +815,16 @@ struct JX3LauncherHomeView: View {
     }
 
     private func heroSlide(_ article: JX3LauncherArticle) -> some View {
-        ZStack {
+        GeometryReader { geometry in
             if let imageURL = article.thumbnailURL {
                 KFImage(imageURL)
                     .placeholder { launcherArtworkFallback }
                     .resizable()
                     .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
             } else {
                 launcherArtworkFallback
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
             }
         }
         .contentShape(Rectangle())
@@ -851,12 +954,26 @@ struct JX3LauncherHomeView: View {
 
     private var launchSettingsColumn: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if !compactHomeEnabled {
+            if showsCloseButton || !compactHomeEnabled {
                 runtimeSummary
                 Divider()
             }
-            compactRuntimeSettings
-            Divider()
+            if (!showsCloseButton && !embeddedDetail) || compactHomeEnabled {
+                compactRuntimeSettings
+                Divider()
+            } else {
+                Button {
+                    showsDetailRuntimeSettings = true
+                } label: {
+                    Label("运行设置", systemImage: "slider.horizontal.3")
+                }
+                .buttonStyle(.borderless)
+                .popover(isPresented: $showsDetailRuntimeSettings) {
+                    compactRuntimeSettings
+                        .padding(20)
+                        .frame(width: 310)
+                }
+            }
             launchActionArea
         }
         .padding(18)
@@ -931,7 +1048,7 @@ struct JX3LauncherHomeView: View {
             // Keep the card's primary action for launching only; a transient
             // launch state remains visible until process monitoring confirms
             // that Wine is alive.
-            if !hasConfirmedJX3Runtime || showsCloseButton {
+            if !hasConfirmedJX3Runtime || showsCloseButton || embeddedDetail {
                 Button {
                     if hasConfirmedJX3Runtime {
                         onStop?()

@@ -7,27 +7,42 @@ nonisolated enum ArclumeWineStopService {
         let lock = NSLock()
         var generation = 0
         var stopping = false
+        var quitting = false
     }
     private static let gate = LaunchGate()
 
     static var isStopping: Bool {
         gate.lock.lock()
         defer { gate.lock.unlock() }
-        return gate.stopping
+        return gate.stopping || gate.quitting
     }
 
     static func launchTicket() throws -> Int {
         gate.lock.lock()
         defer { gate.lock.unlock() }
-        guard !gate.stopping else { throw CancellationError() }
+        guard !gate.stopping, !gate.quitting else { throw CancellationError() }
         return gate.generation
     }
 
     static func withLaunchTicket<T>(_ ticket: Int, _ body: () throws -> T) throws -> T {
         gate.lock.lock()
         defer { gate.lock.unlock() }
-        guard !gate.stopping, ticket == gate.generation else { throw CancellationError() }
+        guard !gate.stopping, !gate.quitting, ticket == gate.generation else { throw CancellationError() }
         return try body()
+    }
+
+    /// Stay closed after drain returns, until AppKit actually exits the App.
+    static func beginApplicationExit() {
+        gate.lock.lock()
+        defer { gate.lock.unlock() }
+        gate.quitting = true
+        gate.generation += 1
+    }
+
+    static func cancelApplicationExit() {
+        gate.lock.lock()
+        defer { gate.lock.unlock() }
+        gate.quitting = false
     }
 
     private static func beginStopping() throws {

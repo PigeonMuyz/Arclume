@@ -115,6 +115,7 @@ struct GameCompatibilityStoreTests {
         let library = LibraryPageGlobals()
         library.customAddedGames = []
         var game = Game.mock
+        game.isCustom = false // Steam ownership entry, not an imported local executable.
         game.isNative = false
         game.platforms.mac = false
         library.games = [game]
@@ -131,11 +132,13 @@ struct GameCompatibilityStoreTests {
         library.customAddedGames = []
 
         var installed = Game.mock
+        installed.isCustom = false
         installed.id = "installed"
         installed.name = "Installed Game"
         installed.isInstalled = true
 
         var owned = Game.mock
+        owned.isCustom = false
         owned.id = "owned"
         owned.name = "Owned Search Result"
         owned.isInstalled = false

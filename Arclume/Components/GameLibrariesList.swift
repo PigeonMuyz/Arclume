@@ -21,13 +21,16 @@ struct GameLibrariesList: View {
                     HStack(alignment: .center) {
                         Text(extractFolderNameRegex(folder))
                         Spacer()
-                        Button(action: {
+                        if getSteamFolderPaths().contains(folder) { Button(action: {
                             removeSteamFolderPath(folder)
                             libraryPageGlobals.folders = getSteamFolderPaths()
                             Task { await load() }
                         }) {
                             Image(systemName: "trash")
                         }.buttonStyle(.borderless)
+                        } else {
+                            Text("自动发现").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     .padding(.horizontal)
                 }

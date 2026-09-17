@@ -38,6 +38,7 @@ nonisolated struct GameAdaptationRule: Decodable, Sendable {
     let portable: Portable?
     let captureErrors: Bool?
     let greenPreparation: GreenPreparation?
+    let launchSupport: String?
 
     var windowsDirectory: String { "C:\\" + installDirectory.replacingOccurrences(of: "/", with: "\\") }
     func directory(in bottle: URL) -> URL { bottle.appendingPathComponent("drive_c/" + installDirectory).standardizedFileURL }
@@ -91,6 +92,12 @@ nonisolated enum GameAdaptationRules {
                   entry.ruleID != nil || entry.ancestorDirectoryName != nil else { throw GameRemovalError.unsupported }
         }
         for rule in document.rules {
+            if let support = rule.launchSupport {
+                guard support == "yy-9.58-v1", rule.id == "yyspeak-portable",
+                      rule.kind == "application", rule.installDirectory == "PortableApps/YYSpeak",
+                      rule.executable == "YY.exe", rule.alternateExecutables.isEmpty,
+                      rule.captureErrors == true else { throw GameRemovalError.unsupported }
+            }
             guard !rule.id.isEmpty, ["game", "launcher", "application"].contains(rule.kind),
                   safeRelativePath(rule.installDirectory), rule.installDirectory.split(separator: "/").count >= 2,
                   safeRelativePath(rule.executable), !rule.executable.contains("/"),

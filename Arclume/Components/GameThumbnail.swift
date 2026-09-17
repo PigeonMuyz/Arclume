@@ -290,10 +290,19 @@ struct GameThumbnail: View {
                     showCardPresentationEditor = true
                 } label: {
                     Label(
-                        isOnlineJX3 ? "编辑剑网3卡片" : "编辑卡片",
+                        isOnlineJX3 && OnlineGameMode.isEnabled ? "编辑剑网3卡片" : "编辑卡片",
                         systemImage: "pencil"
                     )
                 }
+            }
+
+            if !OnlineGameMode.isEnabled {
+                Button("打开安装目录", systemImage: "folder") {
+                    if let directory = LibraryProgramLocation.directory(for: item, steamSnapshot: currentInstallSnapshot) {
+                        NSWorkspace.shared.open(directory)
+                    }
+                }
+                .disabled(LibraryProgramLocation.directory(for: item, steamSnapshot: currentInstallSnapshot) == nil)
             }
 
             if item.isCustom == true {

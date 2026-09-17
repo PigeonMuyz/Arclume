@@ -808,6 +808,8 @@ nonisolated enum SteamInstallDestination: Equatable {
 }
 
 class LibraryPageGlobals: ObservableObject {
+    var hasLibrarySnapshot = false
+    var scanRecords: [LibraryManifestRecord] = []
     private static let linkedSteamMetadataDefaultsKey = "linkedSteamMetadata.v1"
 
     @Published var gamesMeta: [GamesMeta] = []
@@ -825,8 +827,13 @@ class LibraryPageGlobals: ObservableObject {
     @Published var isStoppingWine: Bool = false
     @Published var wineStopErrorMessage: String?
     @Published var launchErrorMessage: String?
-    @Published var customAddedGames: [Game] = []
-    @Published var games: [Game] = []
+    @Published var customAddedGames: [Game] = [] {
+        didSet { refreshLocalProgramAvailability() }
+    }
+    @Published var games: [Game] = [] {
+        didSet { refreshLocalProgramAvailability() }
+    }
+    @Published private(set) var unavailableLocalGameIDs: Set<String> = []
     @Published var ownershipByAppID: [Int: Set<SteamClientKind>] = [:]
     @Published var ownershipSessionCacheKeys: [SteamClientKind: String] = [:]
     @Published private(set) var linkedSteamMetadata: [String: SteamGame] = [:]
@@ -855,7 +862,19 @@ class LibraryPageGlobals: ObservableObject {
             return self.games.filter { !$0.isSteamTool }
         }
         return (self.games + self.customAddedGames.map(resolvedCustomGame)).filter {
-            !$0.isSteamTool
+            !$0.isSteamTool && !unavailableLocalGameIDs.contains($0.id)
+        }
+    }
+
+    func refreshLocalProgramAvailability() {
+        guard !OnlineGameMode.isEnabled else { return }
+        let unavailable = LocalProgramAvailability.unavailableIDs(in: games + customAddedGames)
+        if unavailableLocalGameIDs != unavailable {
+            unavailableLocalGameIDs = unavailable
+        }
+        if let selectedGame, unavailable.contains(selectedGame.id), !isLaunchingGame {
+            showDetailView = false
+            self.selectedGame = nil
         }
     }
     
@@ -1024,6 +1043,23 @@ class LibraryPageGlobals: ObservableObject {
         saveCustomAddedGames()
     }
     
+    func registerStandardJX3(_ discovered: Game, bottle: URL, runtimeKind: String, crossOverPath: String?) {
+        let hidden = UserDefaults(suiteName: suiteName)?.stringArray(forKey: "hiddenInstalledGames.v1") ?? []
+        guard let game = StandardLibraryJX3.entry(
+            discovered: discovered, existing: customAddedGames.first { $0.id == discovered.id },
+            bottle: bottle, runtimeKind: runtimeKind, crossOverPath: crossOverPath, hidden: hidden
+        ) else { return }
+        if let index = customAddedGames.firstIndex(where: { $0.id == game.id }) {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .sortedKeys
+            if (try? encoder.encode(customAddedGames[index])) == (try? encoder.encode(game)) { return }
+            customAddedGames[index] = game
+        } else {
+            customAddedGames.append(game)
+        }
+        saveCustomAddedGames()
+    }
+
     func updateCustomAddedGames(gameData: Game) {
         var updatedGame = gameData
         updatedGame.appStoreMetadataLanguage = "manual"

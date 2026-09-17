@@ -90,6 +90,7 @@ enum OnlineGameRuntimeKind: String, CaseIterable, Identifiable, Sendable {
         for runtime: Self,
         in defaults: UserDefaults? = nil
     ) -> URL? {
+        if runtime == .bundledWine { return BundledWineRuntime.prefixURL }
         let defaults = resolvedDefaults(defaults)
         let key = bottleDefaultsKey(for: runtime)
         guard let path = defaults.string(forKey: key) else { return nil }
@@ -421,17 +422,15 @@ enum BundledWineRuntime {
     }
 
     nonisolated static var prefixURL: URL {
-        ARCLUME_SUPPORT_FOLDER_URL
-            .appendingPathComponent("OnlineGameWinePrefixes", isDirectory: true)
-            .appendingPathComponent(OnlineGameMode.defaultBottleName, isDirectory: true)
+        unifiedPrefixURL
     }
 
-    /// A normal-mode Steam prefix. It never shares or migrates the dedicated
-    /// JX3 prefix, so either runtime can be changed without risking game data.
+    nonisolated static var unifiedPrefixURL: URL {
+        ARCLUME_SUPPORT_FOLDER_URL.appendingPathComponent("ALBottles", isDirectory: true)
+    }
+
     nonisolated static var standardSteamPrefixURL: URL {
-        ARCLUME_SUPPORT_FOLDER_URL
-            .appendingPathComponent("WindowsGameWinePrefixes", isDirectory: true)
-            .appendingPathComponent("Steam", isDirectory: true)
+        unifiedPrefixURL
     }
 
     nonisolated static var runtimeVersion: String {
@@ -439,11 +438,11 @@ enum BundledWineRuntime {
     }
 
     nonisolated static func ownsPrefix(_ bottleURL: URL) -> Bool {
-        bottleURL.standardizedFileURL.path == prefixURL.standardizedFileURL.path
+        bottleURL.resolvingSymlinksInPath().standardizedFileURL.path == prefixURL.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
     nonisolated static func ownsStandardSteamPrefix(_ bottleURL: URL) -> Bool {
-        bottleURL.standardizedFileURL.path == standardSteamPrefixURL.standardizedFileURL.path
+        bottleURL.resolvingSymlinksInPath().standardizedFileURL.path == standardSteamPrefixURL.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
     nonisolated static func isValidRuntime(at runtimeURL: URL = installationURL) -> Bool {
@@ -696,22 +695,26 @@ enum BundledWineRuntime {
     nonisolated static func preparePrefix(
         progress: ProgressHandler?
     ) throws -> URL {
-        try preparePrefix(
+        let result = try preparePrefix(
             at: prefixURL,
-            containerName: "Games",
+            containerName: "ALBottles",
             progress: progress
         )
+        NotificationCenter.default.post(name: .arclumeWinePrefixReady, object: result)
+        return result
     }
 
     @discardableResult
     nonisolated static func prepareStandardSteamPrefix(
         progress: ProgressHandler? = nil
     ) throws -> URL {
-        try preparePrefix(
+        let result = try preparePrefix(
             at: standardSteamPrefixURL,
-            containerName: "Steam",
+            containerName: "ALBottles",
             progress: progress
         )
+        NotificationCenter.default.post(name: .arclumeWinePrefixReady, object: result)
+        return result
     }
 
     private static func preparePrefix(
@@ -719,6 +722,7 @@ enum BundledWineRuntime {
         containerName: String,
         progress: ProgressHandler?
     ) throws -> URL {
+        let launchTicket = try ArclumeWineStopService.launchTicket()
         progress?(0.01, "正在检查内置 Wine…")
         let runtimeURL = try ensureInstalled { fraction, label in
             progress?(0.02 + fraction * 0.60, label)
@@ -780,7 +784,7 @@ enum BundledWineRuntime {
             to: initializationLogHandle
         )
         do {
-            try process.run()
+            try ArclumeWineStopService.withLaunchTicket(launchTicket) { try process.run() }
         } catch {
             try? writePrefixInitializationLog(
                 "无法启动 wineboot：\(error.localizedDescription)",

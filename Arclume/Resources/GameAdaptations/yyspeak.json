@@ -11,6 +11,7 @@
     "requiredFiles": ["yylauncher.exe"],
     "defaultArguments": [],
     "captureErrors": true,
+    "launchSupport": "yy-9.58-v1",
     "portable": { "scriptPolicy": "skip", "preservePaths": [] },
     "greenPreparation": {
       "blockedDirectories": [

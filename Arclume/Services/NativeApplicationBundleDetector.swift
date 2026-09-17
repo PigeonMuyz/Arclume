@@ -5,7 +5,7 @@
 
 import Foundation
 
-struct NativeApplicationBundleInfo: Equatable {
+nonisolated struct NativeApplicationBundleInfo: Equatable, Sendable {
     let url: URL
     let bundleIdentifier: String?
     let executableName: String?
@@ -31,7 +31,7 @@ struct NativeApplicationBundleInfo: Equatable {
     }
 }
 
-enum NativeApplicationBundleDetector {
+nonisolated enum NativeApplicationBundleDetector {
     static func application(at url: URL, fileManager: FileManager = .default) -> NativeApplicationBundleInfo? {
         let url = url.standardizedFileURL
         var isDirectory: ObjCBool = false

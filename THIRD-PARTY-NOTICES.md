@@ -26,4 +26,12 @@ The App and its public source tree include the following compatibility payloads.
 
 ## Release source location
 
+The YY-specific `yy-launch-support.exe` helper is built from this repository's
+`script/diagnostics/yy_dns_probe.c` with `YY_LAUNCH_SUPPORT`, using the reproducible
+command in `script/build_yy_support.sh`. It does not contain YY binaries. MinGW-w64
+startup/runtime notices are included in `Arclume/Resources/yy-support-mingw-w64.txt`.
+The opt-in Wine warmup helper (`wine-keepalive.exe`) is built from
+`script/wine_keepalive.c` using `script/build_wine_keepalive.sh` and uses the same
+MinGW-w64 startup/runtime notices. It contains no game or YY binaries.
+
 For every binary Release, the matching GitHub Release notes identify the exact App tag, Runtime tag and this document. The App tag and public Runtime repository provide the release source, Wine source lock, build scripts and Arclume patches; each separately identified component continues to use its own upstream source and license terms.

@@ -17,6 +17,16 @@ struct ArclumeUITestRootView: View {
     var body: some View {
         Group {
             switch ProcessInfo.processInfo.environment["ARCLUME_UI_TEST_SCENARIO"] {
+            case "library-welcome":
+                if mode != nil {
+                    Text("引导完成").accessibilityIdentifier("welcome-fixture-complete")
+                } else {
+                    LibraryWelcomeView { _, _ in mode = .standard }
+                }
+            case "wine-warmup":
+                WineWarmupOption()
+                    .padding(24)
+                    .frame(width: 500, alignment: .leading)
             case "onboarding":
                 if let mode {
                     Text(mode.rawValue).accessibilityIdentifier("fixture-selected-mode")
