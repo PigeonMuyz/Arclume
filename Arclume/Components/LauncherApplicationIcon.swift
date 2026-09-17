@@ -5,6 +5,7 @@ import SwiftUI
 struct LauncherApplicationIcon: View {
     let game: Game
     var size: CGFloat = 46
+    var onLoad: ((NSImage) -> Void)? = nil
     @EnvironmentObject private var library: LibraryPageGlobals
     @State private var icon: NSImage?
 
@@ -43,7 +44,10 @@ struct LauncherApplicationIcon: View {
                 guard !Task.isCancelled else { return }
                 icon = data.flatMap(NSImage.init(data:))
             }
-            if let loaded = icon { icon = LauncherIconPresentation.normalized(loaded) }
+            if let loaded = icon {
+                icon = LauncherIconPresentation.normalized(loaded)
+                onLoad?(loaded)
+            }
         }
     }
 }

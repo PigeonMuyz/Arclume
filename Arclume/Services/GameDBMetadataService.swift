@@ -4,6 +4,11 @@ nonisolated struct GameDBMetadata: Codable, Sendable {
     struct Artwork: Codable, Sendable { let id: Int; let url: String }
     struct Named: Codable, Sendable { let id: Int; let name: String }
     struct Company: Codable, Sendable { let company: Named; let developer: Bool?; let publisher: Bool? }
+    struct ExternalGame: Codable, Sendable {
+        struct Source: Codable, Sendable { let name: String }
+        let uid: String?
+        let external_game_source: Source?
+    }
     let id: Int
     let name: String
     let summary: String?
@@ -12,6 +17,12 @@ nonisolated struct GameDBMetadata: Codable, Sendable {
     let screenshots: [Artwork]?
     let genres: [Named]?
     let involved_companies: [Company]?
+    var external_games: [ExternalGame]? = nil
+    var localizedName: String? = nil
+    var localizedSummary: String? = nil
+    var language: String? = nil
+    var preferredName: String { localizedName ?? name }
+    var preferredSummary: String? { localizedSummary ?? summary }
 }
 
 nonisolated struct GameDBLink: Codable, Sendable {
@@ -76,8 +87,17 @@ actor GameDBMetadataService {
 
     func details(id: Int) async throws -> GameDBMetadata {
         guard id > 0 else { throw CocoaError(.fileReadInvalidFileName) }
-        let result = try JSONDecoder().decode(GameDBMetadata.self, from: await data("games/\(id).json"))
+        var result = try JSONDecoder().decode(GameDBMetadata.self, from: await data("games/\(id).json"))
         guard result.id == id else { throw CocoaError(.fileReadCorruptFile) }
+        let language = await MainActor.run { GameMetadataLanguage.current.steamStoreLanguage }
+        result.language = language
+        // The verified GameDB mapping is used only for this title's public store
+        // metadata, never to read a Steam account's library or change launch IDs.
+        if let steamID = result.external_games?.first(where: { $0.external_game_source?.name == "Steam" })?.uid,
+           let localized = try? await SteamStoreMetadataService.shared.metadata(appID: steamID, language: language) {
+            result.localizedName = localized.name
+            result.localizedSummary = localized.shortDescription
+        }
         return result
     }
 }
@@ -88,9 +108,9 @@ nonisolated enum GameDBMetadataResolver {
         var result = game
         // Metadata is a fallback layer: local edits and confirmed Steam fields win.
         if result.headerImage.isEmpty { result.headerImage = GameDBMetadataService.artworkURL(metadata.cover) ?? "" }
-        if result.shortDescription.isEmpty { result.shortDescription = metadata.summary ?? "" }
-        if result.detailedDescription.isEmpty { result.detailedDescription = metadata.summary ?? "" }
-        if result.aboutTheGame.isEmpty { result.aboutTheGame = metadata.summary ?? "" }
+        if result.shortDescription.isEmpty { result.shortDescription = metadata.preferredSummary ?? "" }
+        if result.detailedDescription.isEmpty { result.detailedDescription = metadata.preferredSummary ?? "" }
+        if result.aboutTheGame.isEmpty { result.aboutTheGame = metadata.preferredSummary ?? "" }
         if result.developers.isEmpty {
             result.developers = metadata.involved_companies?.filter { $0.developer == true }.map(\.company.name) ?? []
         }

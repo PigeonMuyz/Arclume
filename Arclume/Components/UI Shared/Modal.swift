@@ -35,52 +35,24 @@ struct Modal<Content: View>: View {
     }
     
     var body: some View {
-        ZStack(alignment: .top) {
+        VStack(spacing: 0) {
+            HStack(spacing: 12) {
+                if let title { Text(title).font(.headline).lineLimit(1) }
+                Spacer(minLength: 16)
+                if allowsClose { CloseModalButton(show: $showModal) }
+            }
+            .padding(.horizontal, 24).padding(.vertical, 16)
+            Divider()
             if(scrollable == true) {
                 ScrollView(.vertical) {
                     content
-                        .padding(.top, collapse == true ? 0 : 45)
-                        .padding(.horizontal, collapse == true ? 0 : 15)
+                        .padding(collapse == true ? 0 : 24)
                 }
             } else {
                 content
-                    .padding(.top, collapse == true ? 0 : 45)
-                    .padding(.horizontal, collapse == true ? 0 : 15)
+                    .padding(collapse == true ? 0 : 20)
             }
         }
-        .overlay(alignment: .topLeading) {
-            if allowsClose && (collapse == true || title == nil) {
-                CloseModalButton(show: $showModal)
-                    .padding(15)
-            } else if allowsClose {
-                HStack(alignment: .top) {
-                    CloseModalButton(show: $showModal)
-                    Text(title!)
-                        .font(Font.title3.bold())
-                        .padding(.trailing)
-                        .lineLimit(1)
-                }
-                .frame(alignment: .leading)
-                .padding(15)
-                .background(.ultraThinMaterial)
-                .clipShape(.capsule)
-            }
-        }
-        .background(
-            ZStack {
-                if subdued {
-                    Color(nsColor: .windowBackgroundColor).ignoresSafeArea()
-                } else {
-                    LinearGradient(
-                        colors: [
-                            .arclumeAccent.mix(with: .black, by: 0.2),
-                            .arclumeAccent.mix(with: .black, by: 0.4)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ).ignoresSafeArea()
-                }
-            }
-        )
+        .background(.regularMaterial)
     }
 }

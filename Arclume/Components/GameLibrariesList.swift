@@ -15,11 +15,16 @@ struct GameLibrariesList: View {
         VStack(alignment: .leading) {
             Text(L10n.string("Game libraries"))
                 .padding(.horizontal)
-            VStack {
+            if !libraryPageGlobals.folders.isEmpty { VStack {
                 Divider()
                 ForEach(libraryPageGlobals.folders, id: \.self) {folder in
                     HStack(alignment: .center) {
-                        Text(extractFolderNameRegex(folder))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(folder.contains("drive_c") ? "Windows Steam" : "Steam 游戏库")
+                            Text((URL(string: folder)?.path ?? folder).replacingOccurrences(of: FileManager.default.homeDirectoryForCurrentUser.path, with: "~"))
+                                .font(.caption).foregroundStyle(.secondary)
+                                .lineLimit(1).truncationMode(.middle)
+                        }.help(folder)
                         Spacer()
                         if getSteamFolderPaths().contains(folder) { Button(action: {
                             removeSteamFolderPath(folder)
@@ -29,14 +34,14 @@ struct GameLibrariesList: View {
                             Image(systemName: "trash")
                         }.buttonStyle(.borderless)
                         } else {
-                            Text("自动发现").font(.caption).foregroundStyle(.secondary)
+                            Text("自动发现").font(.caption).foregroundStyle(.secondary).fixedSize()
                         }
                     }
                     .padding(.horizontal)
                 }
                 Divider()
             }
-            .listStyle(.bordered)
+            }
             Button(action: {
                 if let url = openFolderSelectorPanel() {
                     validateAddSteamFolder(url, to: &libraryPageGlobals.folders)
@@ -49,7 +54,5 @@ struct GameLibrariesList: View {
             .padding(.horizontal)
         }
         .padding(.vertical, 10)
-        .background(.black.opacity(0.5))
-        .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 }

@@ -780,7 +780,7 @@ struct GameThumbnail: View {
             return
         }
         libraryPageGlobals.selectedGame = updatedItem
-        libraryPageGlobals.showDetailView =  true
+        libraryPageGlobals.openCustomGameEditor(for: item)
     }
 
     private func updateGamePresentation(_ presentation: OnlineGamePresentation) {

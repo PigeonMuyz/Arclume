@@ -426,7 +426,7 @@ struct Game: Identifiable, Codable {
     let supportInfo: SupportInfo?
     
     let background: String?
-    let backgroundRaw: String?
+    var backgroundRaw: String?
     
     let contentDescriptors: ContentDescriptors?
     let ratings: [String: RatingBody]?
@@ -856,12 +856,16 @@ class LibraryPageGlobals: ObservableObject {
     }
     
     var allGames: [Game] {
+        let presentations = ProjectPresentationStore.read()
         // Keep the standard-edition list on disk untouched, while making the
         // online-only edition's library exclusively discovery-driven.
         if OnlineGameMode.isEnabled {
             return self.games.filter { !$0.isSteamTool }
         }
-        return (self.games + self.customAddedGames.map(resolvedCustomGame)).filter {
+        return (self.games + self.customAddedGames.map(resolvedCustomGame)).map { game in
+            let adapted = GamePresentationProfiles.resolve(game)
+            return presentations[game.id]?.apply(to: adapted) ?? adapted
+        }.filter {
             !$0.isSteamTool && !unavailableLocalGameIDs.contains($0.id)
         }
     }
@@ -987,7 +991,8 @@ class LibraryPageGlobals: ObservableObject {
             guard !Task.isCancelled else { return }
             guard game.gameDBAutoDisabled != true else { continue }
             let oldID = game.gameDBLink?.metadata.id
-            if let link = game.gameDBLink, Date().timeIntervalSince(link.fetchedAt) < 7 * 86400 { continue }
+            if let link = game.gameDBLink, link.metadata.language == GameMetadataLanguage.current.steamStoreLanguage,
+               Date().timeIntervalSince(link.fetchedAt) < 7 * 86400 { continue }
             // Only a verified local identity is auto-linked. Other games use the search sheet.
             let id = oldID ?? game.appExeURL.flatMap { GameAdaptationRules.matching($0)?.gameDBID }
             guard let id else { continue }
@@ -1076,7 +1081,7 @@ class LibraryPageGlobals: ObservableObject {
 
     func openCustomGameEditor(for game: Game? = nil) {
         guard !OnlineGameMode.isEnabled else { return }
-        editingCustomGameID = game?.isCustom == true ? game?.id : nil
+        editingCustomGameID = game?.id
         showCustomGameEditor = true
     }
 

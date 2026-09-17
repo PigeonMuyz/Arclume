@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "jx3",
+      "gameIDs": ["online.jx3.flagship"],
+      "executableNames": [],
+      "localized": {
+        "zh-Hans": {"name": "剑网 3 启动器", "summary": "西山居 · 剑网 3"},
+        "en": {"name": "JX3 Launcher", "summary": "Seasun · JX3"}
+      },
+      "artworkProvider": "jx3-official"
+    }
+  ]
+}

@@ -24,18 +24,11 @@ struct ToolsView: View {
         Modal(
             L10n.string("Tools"),
             showModal: $libraryPageGlobals.showTools,
+            scrollable: false
         ) {
             VStack(alignment: .leading) {
                 Text(L10n.string("Cache management"))
                     .padding(.vertical, 5)
-                ProminentButton(L10n.string("Delete owned games cache"), systemImage: "trash") {
-                    api.deleteOwnedGamesIDsCache()
-                    libraryPageGlobals.gamesMeta.removeAll()
-                    Task {
-                        await load()
-                    }
-                    libraryPageGlobals.showOptions = false
-                }
                 ProminentButton(L10n.string("Delete metadata cache"), systemImage: "trash") {
                     api.deleteGameCache()
                     api.deleteBlacklistCache()
@@ -68,7 +61,7 @@ struct ToolsView: View {
                         }
                     }
                 }
-            }.padding(.vertical, 10)
+            }.padding(.vertical, 10).frame(width: 420, alignment: .leading)
         }
     }
 }

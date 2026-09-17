@@ -20,8 +20,10 @@ struct WindowsInstallerView: View {
     private var bottleURL: URL? { selectedBottle.isEmpty ? nil : URL(fileURLWithPath: selectedBottle, isDirectory: true) }
 
     var body: some View {
+        Modal(title, showModal: Binding(get: { true }, set: { if !$0 { dismiss() } }),
+              scrollable: false, allowsClose: !installation.preparing) {
+        ScrollView {
         VStack(alignment: .leading, spacing: 20) {
-            Text(title).font(.title2.bold())
             LabeledContent("安装包") {
                 Button(installer?.lastPathComponent ?? "选择安装包或压缩包…") { showFilePicker = true }
                     .lineLimit(1).help(installer?.path ?? "选择本地安装包")
@@ -96,7 +98,7 @@ struct WindowsInstallerView: View {
             }
             if let error = error ?? installation.error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
-                Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction).disabled(installation.preparing)
+                Button("关闭") { dismiss() }.buttonStyle(.glass).disabled(installation.preparing)
                 if installation.busy && !installation.preparing {
                     Button("停止识别") { installation.stopMonitoring() }
                 }
@@ -105,12 +107,14 @@ struct WindowsInstallerView: View {
                     if isArchive && installation.portablePreview?.isUpdate == true { confirmPortableUpdate = true }
                     else { launch() }
                 }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.glassProminent)
                     .keyboardShortcut(.defaultAction)
                     .disabled(installer == nil || selectedBottle.isEmpty || installation.busy || libraryPageGlobals.isStoppingWine || (isArchive && installation.portablePreview == nil))
             }
         }
-        .padding(28).frame(width: 520)
+        .padding(4)
+        }.frame(width: 520).frame(maxHeight: 510)
+        }
         .interactiveDismissDisabled(installation.preparing)
         .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [
             UTType(filenameExtension: "exe") ?? .data,

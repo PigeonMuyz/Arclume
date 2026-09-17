@@ -1,6 +1,6 @@
 # ALBottles 程序内迁移
 
-新版以 `~/Library/Application Support/Arclume/ALBottles` 为唯一内置 Wine 容器。YY 也合并进入此容器。启动界面的网格/启动器样式只控制展示，不再选择另一套 Wine 数据。
+新版以 `~/Library/Application Support/Arclume/ALBottles` 为唯一内置 Wine 容器。YY 也合并进入此容器。游戏库统一使用启动器界面，启动台式“全部游戏”面板仅负责选择项目，不再通过界面模式选择另一套 Wine 数据。
 
 ## 升级流程
 

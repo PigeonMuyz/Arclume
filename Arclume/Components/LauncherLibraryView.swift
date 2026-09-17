@@ -11,6 +11,7 @@ struct LauncherLibraryView: View {
     @State private var insertion: LauncherSidebarInsertion?
     @State private var drag: LauncherSidebarDrag?
     @State private var rowFrames: [String: CGRect] = [:]
+    @State private var showAllGames = false
     @Binding var selectedTitle: String
     let onLaunchJX3: (Game) -> Void
     let onStopJX3: () -> Void
@@ -28,6 +29,11 @@ struct LauncherLibraryView: View {
     }
 
     private var selection: Game? { games.first { $0.id == selectionID } ?? games.first }
+
+    private var catalogGames: [Game] {
+        let byID = Dictionary(library.allGames.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return orderedIDs.compactMap { byID[$0] }
+    }
 
     var body: some View {
         GlassEffectContainer(spacing: 16) {
@@ -100,7 +106,8 @@ struct LauncherLibraryView: View {
                     .scrollIndicators(.hidden)
                     .frame(width: sidebarWidth)
                     .glassEffect(in: .rect(cornerRadius: 22))
-                    .padding(.vertical, 72)
+                    .padding(.top, 72)
+                    .padding(.bottom, 122)
                     // Keep the glass rail mounted: animate its actual position instead
                     // of relying on insertion/removal of a lazy scroll view.
                     .offset(x: expanded || reduceMotion ? 0 : -(sidebarWidth + 28))
@@ -112,6 +119,19 @@ struct LauncherLibraryView: View {
             .padding(.leading, 14)
         }
         .overlay(alignment: .bottomLeading) {
+            VStack(spacing: 8) {
+                Button {
+                    showAllGames.toggle()
+                } label: {
+                    Image(systemName: "square.grid.3x3.fill")
+                        .font(.system(size: 16, weight: .medium))
+                        .frame(maxWidth: .infinity, minHeight: 24)
+                }
+                .buttonStyle(.glass).controlSize(.large)
+                .help("全部游戏（⌘F）")
+                .keyboardShortcut("f", modifiers: .command)
+                .accessibilityLabel("全部游戏")
+                .accessibilityIdentifier("launcher.all-games")
             Button {
                 hoveredGameID = nil
                 insertion = nil
@@ -124,14 +144,17 @@ struct LauncherLibraryView: View {
             }
             .buttonStyle(.glass)
             .controlSize(.large)
-            .frame(width: sidebarWidth)
             .help(expanded ? "收起游戏列表" : "展开游戏列表")
             .accessibilityLabel(expanded ? "收起游戏列表" : "展开游戏列表")
             .accessibilityIdentifier("launcher.toggleSidebar")
+            }
+            .frame(width: sidebarWidth)
             .padding(.leading, 14)
             .padding(.bottom, 18)
         }
         }
+        .allowsHitTesting(!showAllGames)
+        .accessibilityHidden(showAllGames)
         // A drag preview floats above the completed glass composition. Placing
         // it inside GlassEffectContainer lets the rail's glass cover the icon.
         .overlay(alignment: .topLeading) {
@@ -148,9 +171,32 @@ struct LauncherLibraryView: View {
         }
         .coordinateSpace(name: "launcher.sidebar")
         .onPreferenceChange(LauncherSidebarFrames.self) { rowFrames = $0 }
+        .overlay {
+            if showAllGames {
+                GeometryReader { geometry in
+                    ZStack {
+                        Color.black.opacity(0.22)
+                            .contentShape(Rectangle())
+                            .onTapGesture { showAllGames = false }
+                            .accessibilityHidden(true)
+                        LauncherAllGamesView(games: catalogGames, onSelect: { game in
+                            selectionID = game.id
+                        }, onClose: { showAllGames = false })
+                        .frame(width: min(1040, max(0, geometry.size.width - 64)),
+                               height: max(0, geometry.size.height - 48))
+                        .background(.regularMaterial, in: .rect(cornerRadius: 28))
+                        .overlay { RoundedRectangle(cornerRadius: 28).strokeBorder(.white.opacity(0.14)) }
+                        .shadow(color: .black.opacity(0.3), radius: 24, y: 12)
+                    }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+                .transition(.opacity.combined(with: .scale(scale: reduceMotion ? 1 : 0.98)))
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: showAllGames)
         .onChange(of: selection?.name, initial: true) { _, name in selectedTitle = name ?? "Arclume" }
         .onChange(of: games.map(\.id), initial: true) { _, ids in
-            if !ids.contains(selectionID) { selectionID = ids.first ?? "" }
+            if !ids.contains(selectionID) { selectionID = games.first?.id ?? ids.first ?? "" }
             if let drag, !ids.contains(drag.source) { self.drag = nil; insertion = nil }
         }
     }

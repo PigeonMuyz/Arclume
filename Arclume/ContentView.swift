@@ -24,8 +24,6 @@ final class Router: ObservableObject {
 }
 
 struct ContentView: View {
-    @AppStorage("libraryPresentation", store: UserDefaults(suiteName: suiteName))
-    private var libraryPresentation = "grid"
     @State private var compactHomeVisible = false
     @AppStorage("jx3CompactHome", store: UserDefaults(suiteName: suiteName))
     private var compactJX3Home = false
@@ -43,7 +41,7 @@ struct ContentView: View {
     @StateObject private var nativeRuntimeStore = NativeAppRuntimeStore()
 
     private var libraryWindowSize: CGSize {
-        guard libraryPresentation == "launcher", modeStore.selectedMode?.isOnlineGameMode != true else {
+        guard modeStore.selectedMode?.isOnlineGameMode != true else {
             return CGSize(width: compactHomeVisible ? 720 : windowWidth, height: compactHomeVisible ? 480 : windowHeight)
         }
         // Keep the launcher wide, while leaving room for the title bar and Dock on smaller displays.

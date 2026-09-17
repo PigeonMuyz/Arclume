@@ -21,6 +21,8 @@ struct GameHeader: View {
     @EnvironmentObject var nativeRuntimeStore: NativeAppRuntimeStore
     @State private var showGameOptions: Bool = false
     @State private var showEditor = false
+    @State private var showQuality = false
+    @State private var iconAccent = Color.accentColor
     var isPlaying: Bool {
         if game!.isNative {
             return nativeRuntimeStore.isActive(gameID: game!.id)
@@ -63,13 +65,27 @@ struct GameHeader: View {
             else { detailControls }
         }
         .sheet(isPresented: $showGameOptions) {
-            Modal(L10n.format("Options for %@", displayName), showModal: $showGameOptions, subdued: true) {
-                GameOptionsView(game: $game)
+            Modal("运行设置 · \(displayName)", showModal: $showGameOptions, scrollable: false, subdued: true) {
+                if game?.isNative == true {
+                    NativeProjectOptionsView(game: game!)
+                } else {
+                    ScrollView { GameOptionsView(game: $game) }.frame(width: 720, height: 480)
+                }
             }
         }
         .sheet(isPresented: $showEditor) {
-            Modal(L10n.string("Custom Game Editor"), showModal: $showEditor, subdued: true) {
-                CustomGameView(isPresented: $showEditor, initialGameID: game?.id)
+            ProjectEditorView(isPresented: $showEditor, initialGame: game)
+        }
+        .sheet(isPresented: $showQuality) {
+            Modal("剑网3画质设置", showModal: $showQuality, scrollable: false) {
+                JX3QualitySettingsView(bottleURL: OnlineGameMode.jx3BottleURL(appGlobals: appGlobals))
+                    .frame(width: 760, height: 520)
+            }
+        }
+        .background {
+            if let game {
+                LauncherApplicationIcon(game: game, size: 1, onLoad: { iconAccent = LauncherAccent.color(from: $0) })
+                    .hidden().allowsHitTesting(false)
             }
         }
     }
@@ -91,28 +107,34 @@ struct GameHeader: View {
                 .font(.headline)
                 .frame(maxWidth: .infinity, minHeight: 32)
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.plain)
+            .padding(.horizontal, 18).padding(.vertical, 8)
+            .foregroundStyle(.white)
+            .glassEffect(.regular.tint(iconAccent.opacity(0.45)).interactive(), in: .capsule)
             .disabled(libraryPageGlobals.isStoppingWine || libraryPageGlobals.isLaunchingGame || game?.isInstalled != true || game?.downloadProgress != 100)
             .accessibilityIdentifier("launcher.primaryAction")
             Menu {
-                if !isDirectNativeApplication {
-                    Button { showGameOptions = true } label: {
-                        Label("运行设置…", systemImage: "slider.horizontal.3")
-                    }
-                }
-                if game?.isCustom == true {
-                    Button { showEditor = true } label: {
-                        Label("编辑项目信息…", systemImage: "pencil")
-                    }
-                }
                 Button(action: revealInstallation) {
                     Label("打开安装目录", systemImage: "folder")
                 }.disabled(installationDirectory == nil)
+                Button { showGameOptions = true } label: {
+                    Label("运行设置", systemImage: "slider.horizontal.3")
+                }
+                Button { showEditor = true } label: {
+                    Label("编辑项目信息", systemImage: "pencil")
+                }
+                if let game, OnlineGameMode.isJX3(game) {
+                    Divider()
+                    Button { showQuality = true } label: { Label("画质设置", systemImage: "display") }
+                }
             } label: {
-                Image(systemName: "ellipsis").frame(minHeight: 32)
+                Image(systemName: "ellipsis").frame(width: 48, height: 48)
             }
             .menuIndicator(.hidden)
             .buttonStyle(.glass)
+            .buttonBorderShape(.circle)
+            .tint(iconAccent.opacity(0.30))
+            .foregroundStyle(.white)
             .help("更多操作")
             .accessibilityLabel("更多操作")
             .accessibilityIdentifier("launcher.more")

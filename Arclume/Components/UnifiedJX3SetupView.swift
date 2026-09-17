@@ -11,9 +11,9 @@ struct UnifiedJX3SetupView: View {
     @State private var message: String?
 
     var body: some View {
+        Modal("配置剑网3启动器", showModal: Binding(get: { true }, set: { if !$0 { dismiss() } }),
+              scrollable: false, allowsClose: !busy) {
         VStack(alignment: .leading, spacing: 22) {
-            Label("配置剑网3启动器", systemImage: "gamecontroller")
-                .font(.title2.weight(.semibold))
             Text(installed ? "已找到剑网3启动器，可以直接在游戏库中打开。" : "使用官网下载的 Windows 安装包，将启动器安装到 ALBottles。")
                 .foregroundStyle(.secondary)
             if busy { ProgressView("正在准备运行环境…") }
@@ -30,7 +30,8 @@ struct UnifiedJX3SetupView: View {
                 }
             }
         }
-        .padding(32).frame(width: 530)
+        .padding(4).frame(width: 490)
+        }
         .interactiveDismissDisabled(busy)
         .task { await detect() }
         .sheet(isPresented: $showInstaller, onDismiss: { Task { await detect() } }) {

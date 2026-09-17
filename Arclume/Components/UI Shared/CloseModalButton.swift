@@ -14,12 +14,13 @@ struct CloseModalButton: View {
         Button {
             show = false
         } label: {
-            Image(systemName: "xmark").foregroundStyle(.black)
+            Image(systemName: "xmark")
+                .font(.system(size: 14, weight: .medium))
+                .frame(width: 20, height: 20)
         }
-        .frame(maxWidth: 20, maxHeight: 20)
-        .background(.white.opacity(0.5))
-        .clipShape(Circle())
-//        .padding(.vertical)
+        .buttonStyle(.glass).controlSize(.large).buttonBorderShape(.circle)
+        .keyboardShortcut(.cancelAction)
+        .help("关闭").accessibilityLabel("关闭")
     }
 }
 

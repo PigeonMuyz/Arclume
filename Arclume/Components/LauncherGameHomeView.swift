@@ -11,24 +11,29 @@ struct LauncherGameHomeView: View {
     @State private var officialArtwork: JX3LauncherArtwork?
     @State private var newsTab = 0
     @State private var logoFailed = false
-    @State private var showDetails = false
 
     private var isJX3: Bool { OnlineGameMode.isJX3(game) }
+    private var usesOfficialArtwork: Bool { GamePresentationProfiles.profile(for: game)?.artworkProvider == "jx3-official" }
     private var artworkAppID: Int { game.steamMetadataLink?.appID ?? game.steamAppID }
 
     private var logoURL: URL? {
-        if let override = OnlineGamePresentationStore.logoURL(for: game.id) { return override }
-        if isJX3 { return officialArtwork?.logoURL }
+        if let logo = ProjectPresentationStore.read()[game.id]?.logo, let url = URL(string: logo), !logo.isEmpty { return url }
+        if ProjectPresentationStore.read()[game.id]?.logo == nil,
+           let override = OnlineGamePresentationStore.logoURL(for: game.id) { return override }
+        if let logo = GamePresentationProfiles.profile(for: game)?.logoURL { return URL(string: logo) }
+        if usesOfficialArtwork { return officialArtwork?.logoURL }
         let appID = artworkAppID
         guard appID > 0 else { return nil }
         return URL(string: "https://shared.akamai.steamstatic.com/store_item_assets/steam/apps/\(appID)/logo.png")
     }
 
     private var artworkURLs: [URL] {
-        let custom = OnlineGamePresentationStore.presentation(for: game.id).selectedArtworkURLString
+        let custom = ProjectPresentationStore.read()[game.id]?.background == nil
+            ? OnlineGamePresentationStore.presentation(for: game.id).selectedArtworkURLString : nil
         // JX3's generic game metadata may also contain a carousel thumbnail.
-        let candidates = isJX3 ? [custom, officialArtwork?.backgroundURL.absoluteString]
-            : [custom, game.backgroundRaw, game.screenshots?.first?.pathFull, game.headerImage]
+        let edited = ProjectPresentationStore.read()[game.id]?.background
+        let candidates = usesOfficialArtwork ? [edited, custom, GamePresentationProfiles.profile(for: game)?.backgroundURL, officialArtwork?.backgroundURL.absoluteString]
+            : [edited, custom, game.backgroundRaw, game.screenshots?.first?.pathFull, game.headerImage]
         var seen = Set<URL>()
         return candidates.compactMap { value -> URL? in
             guard let value, !value.isEmpty, let url = URL(string: value),
@@ -84,14 +89,8 @@ struct LauncherGameHomeView: View {
                     .ignoresSafeArea()
             }
         }
-        .sheet(isPresented: $showDetails) {
-            Modal("详细信息", showModal: $showDetails, subdued: true) {
-                GameDetailView(game: .constant(game), embedded: true)
-                    .frame(minWidth: 760, minHeight: 560)
-            }
-        }
         .task(id: game.id) {
-            guard isJX3 else { return }
+            guard usesOfficialArtwork else { return }
             officialArtwork = JX3LauncherArtworkStore.cached()
             if let updated = await JX3LauncherArtworkStore.refresh(), !Task.isCancelled { officialArtwork = updated }
         }
@@ -104,7 +103,9 @@ struct LauncherGameHomeView: View {
     }
 
     @ViewBuilder private var gameMark: some View {
-        if isJX3, OnlineGamePresentationStore.logoURL(for: game.id) == nil,
+        if usesOfficialArtwork, ProjectPresentationStore.read()[game.id]?.logo?.isEmpty != false,
+           GamePresentationProfiles.profile(for: game)?.logoURL == nil,
+           (ProjectPresentationStore.read()[game.id]?.logo != nil || OnlineGamePresentationStore.logoURL(for: game.id) == nil),
            let data = officialArtwork?.logoData, let image = NSImage(data: data) {
             Image(nsImage: image).resizable().scaledToFit()
                 .padding(.horizontal, 20)
@@ -196,9 +197,6 @@ struct LauncherGameHomeView: View {
             if let executable = game.appExeURL?.lastPathComponent {
                 LabeledContent("启动程序", value: executable).lineLimit(2)
             }
-            Button { showDetails = true } label: {
-                Label("查看详细信息", systemImage: "info.circle")
-            }.buttonStyle(.borderless)
         }
         .font(.callout)
         .textSelection(.enabled)
@@ -235,7 +233,7 @@ private struct LauncherBackdrop: View {
                         .resizable()
                         .aspectRatio(contentMode: preservesWholeArtwork ? .fit : .fill)
                         .frame(width: geometry.size.width, height: geometry.size.height)
-                        .blur(radius: preservesWholeArtwork ? 0 : 10)
+                        .blur(radius: preservesWholeArtwork ? 0 : 3)
                         .clipped()
                         .id(candidate)
                 } else if !preservesWholeArtwork {

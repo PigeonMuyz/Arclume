@@ -149,8 +149,10 @@ extension LibraryPageGlobals {
         guard !hasLibrarySnapshot, !ArclumeTestEnvironment.isTesting,
               let defaults = UserDefaults(suiteName: suiteName),
               let snapshot = LibrarySnapshot.read(from: defaults, context: context) else { return }
-        games = snapshot.games
-        gamesMeta = snapshot.metadata.map { $0.model() }
+        // Older snapshots also contain uninstalled account-owned Steam titles.
+        // Keep the fast launch snapshot, but never reintroduce those placeholders.
+        games = snapshot.games.filter(\.isInstalled)
+        gamesMeta = snapshot.metadata.map { $0.model() }.filter { !$0.installdir.isEmpty }
         folders = snapshot.folders
         scanRecords = snapshot.records
         ownershipByAppID = snapshot.ownership

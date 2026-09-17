@@ -11,9 +11,9 @@ struct LibraryWelcomeView: View {
     private let titles = ["欢迎使用 Arclume", "从你的第一个应用开始", "游戏，都在这里", "按你的习惯出发"]
     private let descriptions = [
         "",
-        "左下角的「操作」可以展开。安装 Windows 程序，或添加已有游戏，都从这里开始。",
-        "用顶部搜索快速找到应用，在「已安装」和「全部」之间切换。Steam 的多个游戏库也会自动扫描。",
-        "右上角的设置可以切换网格与启动器样式，也能管理运行环境和游戏库。"
+        "右上角的「＋」可以添加游戏或安装 Windows 程序。选中侧边栏的图标，就能查看对应游戏。",
+        "左下角的「全部游戏」可以查看和搜索已安装的游戏与应用。选择项目只切换展示，不会直接启动。",
+        "拖动侧边栏图标可以调整顺序，底部箭头可以收起列表。右上角设置用于管理运行环境和游戏库。"
     ]
 
     var body: some View {
@@ -132,22 +132,41 @@ private struct WelcomeLibraryIllustration: View {
                     Circle().fill(.secondary.opacity(0.3)).frame(width: 8, height: 8)
                     Text("Arclume").fontWeight(.semibold)
                     Spacer(minLength: 4)
-                    Label("搜索 · 已安装 / 全部", systemImage: "magnifyingglass")
-                        .font(.caption).padding(9)
-                        .background(step == 2 ? Color.accentColor.opacity(0.25) : Color.secondary.opacity(0.08), in: Capsule())
+                    Image(systemName: "plus").padding(9)
+                        .background(step == 1 ? Color.accentColor.opacity(0.25) : Color.clear, in: Circle())
                     Image(systemName: "gearshape").padding(9)
                         .background(step == 3 ? Color.accentColor.opacity(0.25) : Color.clear, in: Circle())
                 }
                 HStack(spacing: 14) {
-                    previewCard("gamecontroller", title: "游戏")
-                    previewCard("app.dashed", title: "应用")
-                    previewCard("square.stack.3d.up", title: "游戏库")
+                    VStack(spacing: 12) {
+                        Image(systemName: "gamecontroller.fill")
+                        Image(systemName: "app.fill")
+                        Image(systemName: "gamecontroller")
+                    }
+                    .padding(12).background(.quaternary, in: .rect(cornerRadius: 12))
+                    Spacer()
+                    if step == 2 {
+                        VStack(spacing: 10) {
+                            Label("搜索游戏或应用", systemImage: "magnifyingglass").font(.caption)
+                            HStack {
+                                previewCard("gamecontroller", title: "游戏")
+                                previewCard("app.dashed", title: "应用")
+                            }
+                        }.frame(width: 280)
+                    } else {
+                        VStack(alignment: .trailing, spacing: 12) {
+                            Text("游戏标志").font(.headline)
+                            Text("资讯与游戏信息").font(.caption).foregroundStyle(.secondary)
+                            Label("开始游戏", systemImage: "play.fill")
+                                .font(.caption).padding(9)
+                                .background(Color.accentColor.opacity(0.3), in: Capsule())
+                        }
+                    }
                 }
                 HStack(spacing: 12) {
-                    Label("操作", systemImage: "plus").font(.callout.weight(.medium))
+                    Label("全部游戏", systemImage: "square.grid.3x3.fill").font(.callout.weight(.medium))
                         .padding(.horizontal, 14).padding(.vertical, 9)
-                        .background(step == 1 ? Color.accentColor : Color.secondary.opacity(0.12), in: Capsule())
-                    if step == 1 { Text("添加游戏 · 安装程序").font(.caption).foregroundStyle(.secondary) }
+                        .background(step == 2 ? Color.accentColor : Color.secondary.opacity(0.12), in: Capsule())
                     Spacer()
                 }
             }
@@ -156,14 +175,14 @@ private struct WelcomeLibraryIllustration: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 20).strokeBorder(.primary.opacity(0.1))
             }
-            Image(systemName: step == 1 ? "arrow.down" : "arrow.up")
+            Image(systemName: "arrow.up")
                 .font(.system(size: 27, weight: .semibold))
                 .foregroundStyle(Color.accentColor)
                 .phaseAnimator(reduceMotion ? [false] : [false, true]) { content, moved in
-                    content.offset(y: moved ? (step == 1 ? 5 : -5) : 0)
+                    content.offset(y: moved ? -5 : 0)
                 } animation: { _ in .easeInOut(duration: 0.7) }
-                .position(x: step == 1 ? 60 : step == 2 ? geometry.size.width - 170 : geometry.size.width - 35,
-                          y: step == 1 ? 166 : 79)
+                .position(x: step == 2 ? 76 : geometry.size.width - (step == 1 ? 85 : 35),
+                          y: step == 2 ? 245 : 79)
         }
         .accessibilityHidden(true)
     }

@@ -10,8 +10,6 @@ struct OptionsView: View {
     @State private var selectedSettingsPage = "通用"
     @AppStorage("jx3CompactHome", store: UserDefaults(suiteName: suiteName))
     private var compactJX3Home = false
-    @AppStorage("libraryPresentation", store: UserDefaults(suiteName: suiteName))
-    private var libraryPresentation = "grid"
 
     @State private var bottles: [URL] = []
     @State private var progress: Double = 0
@@ -70,6 +68,7 @@ struct OptionsView: View {
         Modal(
             L10n.string("Options"),
             showModal: $libraryPageGlobals.showOptions,
+            collapse: true,
             scrollable: false,
             subdued: true
         ) {
@@ -160,32 +159,27 @@ struct OptionsView: View {
     }
 
     private var settingsContent: some View {
-        HStack(alignment: .top, spacing: 0) {
-            VStack(spacing: 4) {
-                ForEach(settingsPages, id: \.0) { page in
-                    Button {
-                        selectedSettingsPage = page.0
-                    } label: {
-                        Label(page.0, systemImage: page.1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 10)
-                            .background(
-                                selectedSettingsPage == page.0 ? Color.white.opacity(0.12) : .clear,
-                                in: RoundedRectangle(cornerRadius: 8)
-                            )
-                            .contentShape(Rectangle())
+        HStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    Image("Arclume").resizable().scaledToFit().frame(width: 36, height: 36)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Arclume").font(.headline)
+                        Text(applicationVersion).font(.caption).foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(selectedSettingsPage == page.0 ? [.isSelected] : [])
+                }.padding(.horizontal, 18).padding(.top, 20).padding(.bottom, 10)
+            List(selection: $selectedSettingsPage) {
+                ForEach(settingsPages, id: \.0) { page in
+                    Label(page.0, systemImage: page.1).padding(.vertical, 3).tag(page.0)
                 }
-                Spacer()
             }
-            .frame(width: 125)
-            .padding(.trailing, 16)
+            .listStyle(.sidebar).scrollContentBackground(.hidden)
+            }.frame(width: 184)
             Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(selectedSettingsPage).font(.title2.weight(.semibold))
+                    .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 4)
+                Form {
                     switch selectedSettingsPage {
                     case "运行时":
                         settingsCard { standardRuntimeSection }
@@ -207,7 +201,11 @@ struct OptionsView: View {
                         if !appGlobals.selectedBottle.isEmpty {
                             settingsCard { steamPathSection }
                         }
-                        settingsCard { nativeGamesSection }
+                        Section {
+                            LabeledContent("原生游戏") {
+                                Button("扫描应用…") { showNativeGameImport = true }
+                            }
+                        }
                         settingsCard { metadataSection }
                         settingsCard {
                             Button("恢复已隐藏游戏的自动识别") {
@@ -228,13 +226,12 @@ struct OptionsView: View {
                         settingsCard { MicrophonePermissionView() }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 18)
-                .padding(.bottom, 16)
+                .formStyle(.grouped)
+                .scrollContentBackground(.hidden)
+                .controlSize(.regular)
             }
         }
-        .frame(width: 680, height: 500)
-        .padding(.top, 18)
+        .frame(width: 800, height: 510)
     }
 
     private var modeSelectionCard: some View {
@@ -270,47 +267,17 @@ struct OptionsView: View {
     }
 
     private var appearanceCard: some View {
-        settingsCard {
-            Text("外观")
-                .font(.headline)
-            Picker("启动界面", selection: $libraryPresentation) {
-                Text("游戏库").tag("grid")
-                Text("启动器").tag("launcher")
-            }
-            .pickerStyle(.segmented)
-            if let onShowWelcome {
-                Button("重新查看使用引导", systemImage: "sparkles", action: onShowWelcome)
-            }
-            Text("两种样式使用同一游戏库和容器，切换外观不会改变游戏配置。")
-                .font(.footnote).foregroundStyle(.secondary)
-
-            if isOnlineMode {
-                HStack(spacing: 12) {
-                    Label("剑三首页", systemImage: "rectangle.grid.1x2")
-                        .foregroundStyle(.white.opacity(0.82))
-                    Spacer(minLength: 8)
-                    Picker("剑三首页", selection: $compactJX3Home) {
-                        Text("简洁").tag(true)
-                        Text("完整").tag(false)
-                    }
-                    .labelsHidden()
-                    .pickerStyle(.segmented)
-                    .frame(width: 180)
-                }
-                .help("简洁视图隐藏海报和资讯图片，仅保留启动与设置。")
-                Divider()
-            }
-            HStack(spacing: 12) {
-                Label("语言", systemImage: "character.bubble")
-                    .foregroundStyle(.white.opacity(0.82))
-                Spacer(minLength: 8)
+        Section("外观与使用") {
                 Picker("语言", selection: $appSettings.language) {
                     ForEach(AppLanguage.allCases) { language in
                         Text(language.title).tag(language)
                     }
                 }
-                .labelsHidden()
                 .pickerStyle(.menu)
+            if let onShowWelcome {
+                LabeledContent("使用引导") {
+                    Button("重新查看", action: onShowWelcome)
+                }
             }
         }
     }
@@ -512,14 +479,11 @@ struct OptionsView: View {
     private func settingsCard<Content: View>(
         @ViewBuilder content: () -> Content
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12, content: content)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
-            .background(.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(.white.opacity(0.09), lineWidth: 1)
-            }
+        Section {
+            VStack(alignment: .leading, spacing: 10, content: content)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+        }
     }
 
     private var applicationVersion: String {
@@ -693,6 +657,9 @@ struct OptionsView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(L10n.string("Game metadata"))
                 .font(.headline)
+            LabeledContent("补全资料", value: "GameDB / IGDB")
+            Text("通过「更多 → 编辑项目信息 → 匹配资料」补全。优先当前语言，缺失时使用原文。")
+                .font(.caption).foregroundStyle(.secondary)
             Picker(L10n.string("Game metadata"), selection: $steamMetadataSource) {
                 ForEach(SteamMetadataSource.allCases) { source in
                     Text(source.title).tag(source.rawValue)

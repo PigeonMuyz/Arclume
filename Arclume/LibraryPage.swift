@@ -29,8 +29,6 @@ struct LibraryPage: View {
     @State private var showOnlineRuntimeUpdate = false
     @State private var didOfferOnlineSetupGuide = false
     @State private var jx3LaunchMonitor: Task<Void, Never>?
-    @AppStorage("libraryPresentation", store: UserDefaults(suiteName: suiteName))
-    private var libraryPresentation = "grid"
     @AppStorage("unifiedLibraryOnboarding.v1", store: UserDefaults(suiteName: suiteName))
     private var completedUnifiedOnboarding = false
     @State private var showUnifiedOnboarding = false
@@ -40,37 +38,6 @@ struct LibraryPage: View {
     
     var body: some View {
         ZStack {
-            if libraryPageGlobals.isLaunchingGame && !OnlineGameMode.isEnabled && libraryPresentation != "launcher" {
-                VStack {
-                    ProgressView(label: {
-                        Text(
-                            L10n.format(
-                                "Launching %@...",
-                                libraryPageGlobals.selectedGame?.name
-                                    ?? L10n.string("Unknown")
-                            )
-                        )
-                    })
-                    .progressViewStyle(.circular)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .ignoresSafeArea()
-                    .background {
-                        if (libraryPageGlobals.selectedGame?.headerImage != nil){
-                            KFImage(URL(string: libraryPageGlobals.selectedGame!.headerImage))
-                                .placeholder {
-                                    ProgressView()
-                                }
-                                .resizable()
-                                .scaledToFill()
-                                .blur(radius: 10)
-                                .opacity(0.4)
-                        }
-                    }
-                }
-                .background(.black)
-                .frame(maxWidth: .infinity, maxHeight: .infinity).zIndex(10)
-            }
-            
             VStack {
                 if (errorMessage != nil) {
                     ContentUnavailableView {
@@ -136,10 +103,8 @@ struct LibraryPage: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .foregroundStyle(.white)
                     }
-                } else if libraryPresentation == "launcher" {
-                    LauncherLibraryView(selectedTitle: $launcherTitle, onLaunchJX3: launchJX3Game, onStopJX3: forceQuitJX3Game)
                 } else {
-                    GamesList(load: load)
+                    LauncherLibraryView(selectedTitle: $launcherTitle, onLaunchJX3: launchJX3Game, onStopJX3: forceQuitJX3Game)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -200,20 +165,9 @@ struct LibraryPage: View {
             } message: {
                 Text(libraryPageGlobals.wineStopErrorMessage ?? "")
             }
-            .sheet(isPresented: $libraryPageGlobals.showDetailView) {
-                GameDetailView(game: $libraryPageGlobals.selectedGame)
-            }
             .sheet(isPresented: $libraryPageGlobals.showCustomGameEditor) {
-                Modal(
-                    L10n.string("Custom Game Editor"),
-                    showModal: $libraryPageGlobals.showCustomGameEditor,
-                    scrollable: true
-                ) {
-                    CustomGameView(
-                        isPresented: $libraryPageGlobals.showCustomGameEditor,
-                        initialGameID: libraryPageGlobals.editingCustomGameID
-                    )
-                }
+                ProjectEditorView(isPresented: $libraryPageGlobals.showCustomGameEditor,
+                    initialGame: libraryPageGlobals.allGames.first { $0.id == libraryPageGlobals.editingCustomGameID })
             }
             .sheet(isPresented: $libraryPageGlobals.showWindowsInstaller) {
                 WindowsInstallerView()
@@ -229,44 +183,10 @@ struct LibraryPage: View {
                         .padding()
                         .transition(.opacity)
                     }
-                } else if libraryPresentation != "launcher" {
-                    HStack(alignment: .bottom) {
-                        ArclumeToolbar()
-                        Spacer()
-                        if containerSteamStore.steamSetupBusy {
-                            ProgressView(value: containerSteamStore.steamSetupProgress) {
-                                Text(containerSteamStore.steamSetupMessage ?? "正在安装 Steam…")
-                                    .font(.caption)
-                                    .lineLimit(2)
-                            }
-                            .frame(width: 230)
-                        } else if isLoading {
-                            LoadingProgress(progress: $progress)
-                        }
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .transition(.opacity)
-                    .background {
-                        Rectangle()
-                            .fill(.ultraThinMaterial.opacity(0.5))
-                            .overlay(.arclumeAccent.mix(with: .black, by: 0.4).opacity(0.5))
-                            .mask {
-                                LinearGradient(
-                                    gradient: Gradient(stops: [
-                                        .init(color: .black.opacity(0.0), location: 0.0), // top = transparent
-                                        .init(color: .black.opacity(0.9), location: 0.5), // fade in
-                                        .init(color: .black.opacity(1.0), location: 1.0)              // bottom = solid
-                                    ]),
-                                    startPoint: .top,
-                                    endPoint: .bottom
-                                )
-                            }
-                    }
                 }
             }
             .overlay(alignment: .bottomLeading) {
-                if libraryPresentation == "launcher" && !OnlineGameMode.isEnabled {
+                if !OnlineGameMode.isEnabled {
                     HStack(spacing: 14) {
                         if containerSteamStore.steamSetupBusy {
                             ProgressView(value: containerSteamStore.steamSetupProgress)
@@ -280,13 +200,13 @@ struct LibraryPage: View {
                     .padding(18)
                 }
             }
-            .navigationTitle(libraryPresentation == "launcher" ? launcherTitle : "Arclume")
+            .navigationTitle(launcherTitle)
             .background {
                 if !OnlineGameMode.isEnabled {
-                    LibraryWindowTitle(title: libraryPresentation == "launcher" ? launcherTitle : "Arclume")
+                    LibraryWindowTitle(title: launcherTitle)
                 }
             }
-            .toolbarBackgroundVisibility(libraryPresentation == "launcher" ? .hidden : .automatic, for: .windowToolbar)
+            .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
             .onAppear() {
                 libraryPageGlobals.restoreSnapshot(context: appGlobals.selectedBottle)
                 isLoading = !libraryPageGlobals.hasLibrarySnapshot
@@ -355,7 +275,7 @@ struct LibraryPage: View {
                     libraryPageGlobals: libraryPageGlobals,
                     load: load,
                     isOnlineMode: OnlineGameMode.isEnabled,
-                    isLauncherPresentation: libraryPresentation == "launcher"
+                    isLauncherPresentation: true
                 ) }
             }
             .environmentObject(libraryPageGlobals)
@@ -483,7 +403,6 @@ struct LibraryPage: View {
         var scannedRecords: [LibraryManifestRecord] = []
         await libraryScanner.seed(libraryPageGlobals.scanRecords)
         var ownershipByAppID: [Int: Set<SteamClientKind>] = [:]
-        var ownershipSessionCacheKeys: [SteamClientKind: String] = [:]
         let detectedNativeSteam = appGlobals.nativeSteamInstallation
             ?? SteamDiscoveryService().detectNativeSteam()
         let nativeLibraryPaths = Set(
@@ -532,78 +451,8 @@ struct LibraryPage: View {
             }
         }
 
-        let ownedLibraryService = SteamOwnedLibraryService()
-        var ownedAppIDsBySteamID: [String: Set<String>] = [:]
-        for session in appGlobals.steamSessions {
-            ownershipSessionCacheKeys[session.clientKind] = session.cacheKey
-            let scanResult = await Task.detached(priority: .utility) {
-                SteamOwnedLibraryService().scanOwnedAppIDs(steamID: session.identity.steamID,
-                    steamRootURLs: [session.steamRootURL])
-            }.value
-            var sessionAppIDs = Set(
-                scanResult.appIDs
-            )
-            var didResolveCompleteLibrary = scanResult.didReadAllRoots
-
-            if isConfiguredMetadataServiceAvailable {
-                do {
-                    let remoteAppIDs = try await api.fetchOwnedGamesIDs(
-                        userID: session.identity.steamID,
-                        identityCacheKey: "account:\(session.identity.steamID)"
-                    )
-                    sessionAppIDs.formUnion(remoteAppIDs)
-                    didResolveCompleteLibrary = true
-                } catch {
-                    console.error("fetchOwnedGamesIDs \(String(reflecting: error))")
-                }
-            }
-
-            if !didResolveCompleteLibrary,
-               libraryPageGlobals.ownershipSessionCacheKeys[session.clientKind]
-                    == session.cacheKey {
-                let retainedAppIDs = libraryPageGlobals.ownershipByAppID.compactMap {
-                    appID, ownership in
-                    ownership.contains(session.clientKind) ? String(appID) : nil
-                }
-                if !retainedAppIDs.isEmpty {
-                    console.warn(
-                        "Retaining \(retainedAppIDs.count) owned games for \(session.cacheKey) after a temporary librarycache read failure"
-                    )
-                    sessionAppIDs.formUnion(retainedAppIDs)
-                }
-            }
-
-            ownedAppIDsBySteamID[
-                session.identity.steamID,
-                default: []
-            ].formUnion(sessionAppIDs)
-        }
-
-        // Steam licenses belong to the account, not to one client cache. When
-        // native Steam and the selected bottle use the same SteamID, a title
-        // discovered from either userdata/librarycache is installable through
-        // both compatible clients.
-        for (appID, accountOwnership) in ownedLibraryService.ownershipByAppID(
-            sessions: appGlobals.steamSessions,
-            appIDsBySteamID: ownedAppIDsBySteamID
-        ) {
-            ownershipByAppID[appID, default: []].formUnion(accountOwnership)
-        }
-
-        let ownedMeta = ownershipByAppID.keys.sorted()
-            .filter { appID in
-                !loadedGamesMeta.contains(where: { $0.appid == String(appID) })
-            }
-            .map {
-                GamesMeta(
-                    appid: String($0),
-                    installdir: "",
-                    bytesDownloaded: "0",
-                    BytesTodownload: "0"
-                )
-            }
-        loadedGamesMeta.append(contentsOf: ownedMeta)
-
+        // Only local installation manifests contribute Steam titles. Do not
+        // expand account ownership from userdata/librarycache or the remote API.
         var loadedGames = api.cachedGamesInfo(
             meta: loadedGamesMeta,
             setProgress: { value in
@@ -660,7 +509,7 @@ struct LibraryPage: View {
         libraryPageGlobals.applyScannedGames(loadedGames)
         libraryPageGlobals.scanRecords = scannedRecords
         libraryPageGlobals.ownershipByAppID = ownershipByAppID
-        libraryPageGlobals.ownershipSessionCacheKeys = ownershipSessionCacheKeys
+        libraryPageGlobals.ownershipSessionCacheKeys = [:]
         libraryPageGlobals.hasLibrarySnapshot = true
         libraryPageGlobals.saveSnapshot(context: scanContext)
         progress = 100
