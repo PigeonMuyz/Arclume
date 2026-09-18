@@ -4,6 +4,28 @@ import Testing
 
 @MainActor
 struct WineWarmupTests {
+    @Test func oneContainerNeedsNoSecondarySelection() {
+        #expect(WineWarmupTarget.effectiveSelection(selected: [], available: [.steam]) == [.steam])
+        #expect(WineWarmupTarget.effectiveSelection(selected: [.games], available: [.steam]) == [.steam])
+        #expect(WineWarmupTarget.effectiveSelection(selected: [.steam], available: [.games]) == [.games])
+    }
+
+    @Test func multipleContainersPreserveExplicitSelection() {
+        #expect(WineWarmupTarget.effectiveSelection(selected: [], available: [.steam, .games]).isEmpty)
+        #expect(WineWarmupTarget.effectiveSelection(selected: [.games], available: [.steam, .games]) == [.games])
+        #expect(WineWarmupTarget.effectiveSelection(selected: [.steam, .games], available: [.steam, .games]) == [.steam, .games])
+        #expect(WineWarmupTarget.effectiveSelection(selected: [.steam, .games], available: []).isEmpty)
+    }
+
+    @Test func legacyAliasesDoNotCountAsMultipleContainers() {
+        let unified = URL(fileURLWithPath: "/fixture/ALBottles")
+        #expect(WineWarmupTarget.uniqueTargets(prefixes: [.steam: unified, .games: unified]) == [.steam])
+        #expect(WineWarmupTarget.uniqueTargets(prefixes: [
+            .steam: unified, .games: URL(fileURLWithPath: "/fixture/Games")
+        ]) == [.steam, .games])
+        #expect(WineWarmupTarget.uniqueTargets(prefixes: [:]).isEmpty)
+    }
+
     @Test func multipleTargetsRoundTripAndRemoval() {
         var targets: Set<WineWarmupTarget> = [.steam, .games]
         #expect(WineWarmupTarget.decode(WineWarmupTarget.encode(targets)) == targets)

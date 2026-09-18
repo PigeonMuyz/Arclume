@@ -14,6 +14,7 @@ struct Modal<Content: View>: View {
     var scrollable: Bool? = true
     var allowsClose = true
     var subdued = false
+    var onClose: (() -> Void)?
     let content: Content
     
     init(
@@ -23,6 +24,7 @@ struct Modal<Content: View>: View {
         scrollable: Bool = true,
         allowsClose: Bool = true,
         subdued: Bool = false,
+        onClose: (() -> Void)? = nil,
         @ViewBuilder content: () -> Content
     ) {
         self._showModal = showModal
@@ -32,6 +34,7 @@ struct Modal<Content: View>: View {
         self.scrollable = scrollable
         self.allowsClose = allowsClose
         self.subdued = subdued
+        self.onClose = onClose
     }
     
     var body: some View {
@@ -39,7 +42,7 @@ struct Modal<Content: View>: View {
             HStack(spacing: 12) {
                 if let title { Text(title).font(.headline).lineLimit(1) }
                 Spacer(minLength: 16)
-                if allowsClose { CloseModalButton(show: $showModal) }
+                if allowsClose { CloseModalButton(show: $showModal, action: onClose) }
             }
             .padding(.horizontal, 24).padding(.vertical, 16)
             Divider()
@@ -53,6 +56,5 @@ struct Modal<Content: View>: View {
                     .padding(collapse == true ? 0 : 20)
             }
         }
-        .background(.regularMaterial)
     }
 }

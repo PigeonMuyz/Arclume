@@ -3,6 +3,8 @@ import UniformTypeIdentifiers
 
 struct WindowsInstallerView: View {
     var title = "安装 Windows 程序"
+    var onboarding = false
+    var onComplete: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appGlobals: AppGlobals
     @EnvironmentObject private var libraryPageGlobals: LibraryPageGlobals
@@ -20,8 +22,58 @@ struct WindowsInstallerView: View {
     private var bottleURL: URL? { selectedBottle.isEmpty ? nil : URL(fileURLWithPath: selectedBottle, isDirectory: true) }
 
     var body: some View {
+        Group {
+        if onboarding {
+            OnboardingStage(title: title) {
+                installerForm
+            } actions: {
+                Button("稍后继续") { onComplete?() }.buttonStyle(.glass).disabled(installation.preparing)
+                Spacer()
+                Button("完成配置") { onComplete?() }.buttonStyle(.glassProminent).disabled(installation.busy)
+            }
+        } else {
         Modal(title, showModal: Binding(get: { true }, set: { if !$0 { dismiss() } }),
               scrollable: false, allowsClose: !installation.preparing) {
+            installerForm
+        }
+        }
+        }
+        .interactiveDismissDisabled(installation.preparing)
+        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [
+            UTType(filenameExtension: "exe") ?? .data,
+            UTType(filenameExtension: "msi") ?? .data,
+            UTType(filenameExtension: "zip") ?? .data,
+            UTType(filenameExtension: "7z") ?? .data,
+            UTType(filenameExtension: "rar") ?? .data
+        ]) { result in
+            do {
+                let url = try result.get()
+                if PortableArchiveReader.supports(url) {
+                    adaptation = nil
+                    installation.preparePortable(url, bottle: bottleURL)
+                } else {
+                    _ = try WindowsInstallerService.arguments(for: url)
+                    adaptation = try WindowsInstallerService.adaptation(for: url)
+                    installation.discardPortable()
+                }
+                installer = url
+                error = nil
+            } catch { self.error = error.localizedDescription }
+        }
+        .onAppear { refreshBottles() }
+        .onChange(of: runtime) { _, _ in refreshBottles() }
+        .onChange(of: selectedBottle) { _, _ in installation.refreshPortablePreview(bottle: bottleURL) }
+        .onChange(of: installation.portableChoiceID) { _, _ in installation.refreshPortablePreview(bottle: bottleURL) }
+        .onDisappear { installation.discardPortable() }
+        .confirmationDialog("替换已有软件？", isPresented: $confirmPortableUpdate) {
+            Button("替换更新", role: .destructive) { launch() }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("用所选压缩包替换软件本体，保留原启动入口、AppData 和注册表。旧目录会保留供恢复；这不会验证新版是否可登录或使用语音。")
+        }
+    }
+
+    private var installerForm: some View {
         ScrollView {
         VStack(alignment: .leading, spacing: 20) {
             LabeledContent("安装包") {
@@ -98,7 +150,9 @@ struct WindowsInstallerView: View {
             }
             if let error = error ?? installation.error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
             HStack {
-                Button("关闭") { dismiss() }.buttonStyle(.glass).disabled(installation.preparing)
+                if !onboarding {
+                    Button("关闭") { dismiss() }.buttonStyle(.glass).disabled(installation.preparing)
+                }
                 if installation.busy && !installation.preparing {
                     Button("停止识别") { installation.stopMonitoring() }
                 }
@@ -114,40 +168,6 @@ struct WindowsInstallerView: View {
         }
         .padding(4)
         }.frame(width: 520).frame(maxHeight: 510)
-        }
-        .interactiveDismissDisabled(installation.preparing)
-        .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [
-            UTType(filenameExtension: "exe") ?? .data,
-            UTType(filenameExtension: "msi") ?? .data,
-            UTType(filenameExtension: "zip") ?? .data,
-            UTType(filenameExtension: "7z") ?? .data,
-            UTType(filenameExtension: "rar") ?? .data
-        ]) { result in
-            do {
-                let url = try result.get()
-                if PortableArchiveReader.supports(url) {
-                    adaptation = nil
-                    installation.preparePortable(url, bottle: bottleURL)
-                } else {
-                    _ = try WindowsInstallerService.arguments(for: url)
-                    adaptation = try WindowsInstallerService.adaptation(for: url)
-                    installation.discardPortable()
-                }
-                installer = url
-                error = nil
-            } catch { self.error = error.localizedDescription }
-        }
-        .onAppear { refreshBottles() }
-        .onChange(of: runtime) { _, _ in refreshBottles() }
-        .onChange(of: selectedBottle) { _, _ in installation.refreshPortablePreview(bottle: bottleURL) }
-        .onChange(of: installation.portableChoiceID) { _, _ in installation.refreshPortablePreview(bottle: bottleURL) }
-        .onDisappear { installation.discardPortable() }
-        .confirmationDialog("替换已有软件？", isPresented: $confirmPortableUpdate) {
-            Button("替换更新", role: .destructive) { launch() }
-            Button("取消", role: .cancel) { }
-        } message: {
-            Text("用所选压缩包替换软件本体，保留原启动入口、AppData 和注册表。旧目录会保留供恢复；这不会验证新版是否可登录或使用语音。")
-        }
     }
 
     private func refreshBottles() {

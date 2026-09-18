@@ -18,6 +18,28 @@ nonisolated enum WineWarmupTarget: String, CaseIterable, Identifiable, Sendable 
         }
     }
 
+    /// Count real, distinct managed containers rather than legacy target aliases.
+    @MainActor static var available: [Self] {
+        guard !ArclumeTestEnvironment.isTesting else { return [] }
+        let prefixes = Dictionary(uniqueKeysWithValues: allCases.compactMap { target in
+            BundledWineRuntime.isValidPrefix(at: target.prefix) ? (target, target.prefix) : nil
+        })
+        return uniqueTargets(prefixes: prefixes)
+    }
+
+    static func uniqueTargets(prefixes: [Self: URL]) -> [Self] {
+        var paths = Set<String>()
+        return allCases.filter { target in
+            guard let prefix = prefixes[target] else { return false }
+            return paths.insert(prefix.resolvingSymlinksInPath().standardizedFileURL.path).inserted
+        }
+    }
+
+    static func effectiveSelection(selected: Set<Self>, available: [Self]) -> Set<Self> {
+        if available.count == 1 { return Set(available) }
+        return selected.intersection(available)
+    }
+
     static func decode(_ raw: String) -> Set<Self> {
         guard let values = try? JSONDecoder().decode([String].self, from: Data(raw.utf8)) else { return [] }
         return Set(values.compactMap(Self.init(rawValue:)))

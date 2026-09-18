@@ -8,12 +8,8 @@ struct ArclumeResetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("重置 Arclume").font(.headline)
-            Text("清除应用设置和 Application Support/Arclume，下次打开重新初始化。")
-                .font(.callout)
-            Text("包含 Arclume 容器内安装的游戏、Windows 程序、存档和登录数据。该目录会移至废纸篓，不会立即释放磁盘空间。")
+            Text("清除设置，并将容器内的游戏、存档和登录数据移到废纸篓。")
                 .font(.footnote).foregroundStyle(.orange)
-            Text("外部游戏、原生 Steam、其他应用设置、独立缓存/诊断日志和系统隐私授权不受影响。")
-                .font(.footnote).foregroundStyle(.secondary)
             Button("重置设置和应用数据…", role: .destructive) {
                 confirmation = ""
                 showConfirmation = true

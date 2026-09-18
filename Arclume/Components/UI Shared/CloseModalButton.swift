@@ -9,10 +9,11 @@ import SwiftUI
 
 struct CloseModalButton: View {
     @Binding var show: Bool
+    var action: (() -> Void)? = nil
     
     var body: some View {
         Button {
-            show = false
+            if let action { action() } else { show = false }
         } label: {
             Image(systemName: "xmark")
                 .font(.system(size: 14, weight: .medium))

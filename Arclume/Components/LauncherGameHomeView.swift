@@ -6,6 +6,8 @@ struct LauncherGameHomeView: View {
     let game: Game
     let onLaunchJX3: () -> Void
     let onStopJX3: () -> Void
+    var presentationOverride: ProjectPresentation? = nil
+    var isPreview = false
     @StateObject private var gameOptions = GameOptions()
     @State private var feed: JX3LauncherFeed?
     @State private var officialArtwork: JX3LauncherArtwork?
@@ -15,10 +17,11 @@ struct LauncherGameHomeView: View {
     private var isJX3: Bool { OnlineGameMode.isJX3(game) }
     private var usesOfficialArtwork: Bool { GamePresentationProfiles.profile(for: game)?.artworkProvider == "jx3-official" }
     private var artworkAppID: Int { game.steamMetadataLink?.appID ?? game.steamAppID }
+    private var presentation: ProjectPresentation? { presentationOverride ?? ProjectPresentationStore.read()[game.id] }
 
     private var logoURL: URL? {
-        if let logo = ProjectPresentationStore.read()[game.id]?.logo, let url = URL(string: logo), !logo.isEmpty { return url }
-        if ProjectPresentationStore.read()[game.id]?.logo == nil,
+        if let logo = presentation?.logo, let url = URL(string: logo), !logo.isEmpty { return url }
+        if presentation?.logo == nil,
            let override = OnlineGamePresentationStore.logoURL(for: game.id) { return override }
         if let logo = GamePresentationProfiles.profile(for: game)?.logoURL { return URL(string: logo) }
         if usesOfficialArtwork { return officialArtwork?.logoURL }
@@ -28,10 +31,10 @@ struct LauncherGameHomeView: View {
     }
 
     private var artworkURLs: [URL] {
-        let custom = ProjectPresentationStore.read()[game.id]?.background == nil
+        let custom = presentation?.background == nil
             ? OnlineGamePresentationStore.presentation(for: game.id).selectedArtworkURLString : nil
         // JX3's generic game metadata may also contain a carousel thumbnail.
-        let edited = ProjectPresentationStore.read()[game.id]?.background
+        let edited = presentation?.background
         let candidates = usesOfficialArtwork ? [edited, custom, GamePresentationProfiles.profile(for: game)?.backgroundURL, officialArtwork?.backgroundURL.absoluteString]
             : [edited, custom, game.backgroundRaw, game.screenshots?.first?.pathFull, game.headerImage]
         var seen = Set<URL>()
@@ -92,20 +95,22 @@ struct LauncherGameHomeView: View {
         .task(id: game.id) {
             guard usesOfficialArtwork else { return }
             officialArtwork = JX3LauncherArtworkStore.cached()
+            guard !isPreview else { return }
             if let updated = await JX3LauncherArtworkStore.refresh(), !Task.isCancelled { officialArtwork = updated }
         }
         .task(id: game.id) {
             guard isJX3 else { return }
             feed = JX3LauncherFeedStore.cachedFeed()
+            guard !isPreview else { return }
             if let updated = await JX3LauncherFeedStore.refresh(), !Task.isCancelled { feed = updated }
         }
         .onChange(of: logoURL) { _, _ in logoFailed = false }
     }
 
     @ViewBuilder private var gameMark: some View {
-        if usesOfficialArtwork, ProjectPresentationStore.read()[game.id]?.logo?.isEmpty != false,
+        if usesOfficialArtwork, presentation?.logo?.isEmpty != false,
            GamePresentationProfiles.profile(for: game)?.logoURL == nil,
-           (ProjectPresentationStore.read()[game.id]?.logo != nil || OnlineGamePresentationStore.logoURL(for: game.id) == nil),
+           (presentation?.logo != nil || OnlineGamePresentationStore.logoURL(for: game.id) == nil),
            let data = officialArtwork?.logoData, let image = NSImage(data: data) {
             Image(nsImage: image).resizable().scaledToFit()
                 .padding(.horizontal, 20)

@@ -842,9 +842,10 @@ class LibraryPageGlobals: ObservableObject {
     @Published var playingID: String?
     @Published var jx3RuntimeActivity: JX3RuntimeActivity = .idle
     
-    init() {
+    init(loadSavedLibrary: Bool = true) {
         // 剑网3模式与普通版共用 Bundle ID，因此也会共用这份已保存的
         // 手动游戏列表。剑网3模式不应先显示它们、再等待异步扫描清空。
+        guard loadSavedLibrary else { return }
         if !OnlineGameMode.isEnabled {
             self.loadCustomAddedGames()
         }
@@ -1319,7 +1320,8 @@ final class AppGlobals: ObservableObject {
         steamSessions.map(\.cacheKey).joined(separator: "|")
     }
     
-    init(selectedBottle: String? = "", cxAppPath: String? = nil) {
+    init(selectedBottle: String? = "", cxAppPath: String? = nil, demonstrationOnly: Bool = false) {
+        guard !demonstrationOnly else { return }
         let stored = readUsrDefOptionString(key: "selectedBottle") ?? ""
         // Hosted tests and UI fixtures must not migrate real preferences.
         self.selectedBottle = ArclumeTestEnvironment.isTesting ? stored : BundledRuntimePolicy.adopt(

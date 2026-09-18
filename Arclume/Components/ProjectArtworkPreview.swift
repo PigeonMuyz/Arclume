@@ -10,6 +10,7 @@ struct ProjectArtworkPreview: View {
     var fallbackImage: NSImage? = nil
     var logo = false
     @State private var showAddress = false
+    @State private var addressDraft = ""
 
     private var imageURL: URL? { value.isEmpty ? fallback : URL(string: value) }
 
@@ -34,13 +35,13 @@ struct ProjectArtworkPreview: View {
                         }.foregroundStyle(.secondary)
                     }
                 }.clipShape(RoundedRectangle(cornerRadius: 12))
-            }.frame(height: logo ? 94 : 160)
+            }.frame(height: logo ? 90 : 120)
             HStack {
                 Text(title).font(.subheadline.weight(.medium))
                 Spacer()
                 Menu {
                     Button("选择图片…", systemImage: "photo") { chooseImage() }
-                    Button("使用图片链接…", systemImage: "link") { showAddress = true }
+                    Button("使用图片链接…", systemImage: "link") { addressDraft = value; showAddress = true }
                     if !value.isEmpty {
                         Button("恢复自动获取", systemImage: "arrow.counterclockwise") { value = "" }
                     }
@@ -49,8 +50,18 @@ struct ProjectArtworkPreview: View {
                 .popover(isPresented: $showAddress) {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("\(title)链接").font(.headline)
-                        TextField("https://…", text: $value).textFieldStyle(.roundedBorder)
-                        HStack { Spacer(); Button("完成") { showAddress = false }.buttonStyle(.glass) }
+                        TextField("https://…", text: $addressDraft).textFieldStyle(.roundedBorder)
+                        if !ProjectEditorValidation.imageAddress(addressDraft) {
+                            Text("请输入有效的 http、https 或本地图片地址。")
+                                .font(.caption).foregroundStyle(.red)
+                        }
+                        HStack {
+                            Spacer()
+                            Button("取消") { showAddress = false }.buttonStyle(.glass)
+                            Button("采用") { value = addressDraft; showAddress = false }
+                                .buttonStyle(.glassProminent)
+                                .disabled(!ProjectEditorValidation.imageAddress(addressDraft))
+                        }
                     }.padding(20).frame(width: 340)
                 }
             }

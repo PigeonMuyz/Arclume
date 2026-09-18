@@ -119,7 +119,10 @@ final class WineWarmupService: ObservableObject {
         guard !ArclumeTestEnvironment.isTesting, !quitting else { return }
         let defaults = UserDefaults(suiteName: suiteName)
         let enabled = defaults?.bool(forKey: Self.defaultsKey) == true
-        let targets = WineWarmupTarget.decode(defaults?.string(forKey: Self.targetsKey) ?? "[]")
+        let targets = WineWarmupTarget.effectiveSelection(
+            selected: WineWarmupTarget.decode(defaults?.string(forKey: Self.targetsKey) ?? "[]"),
+            available: WineWarmupTarget.available
+        )
         var warmedPaths = Set<String>()
         for target in WineWarmupTarget.allCases {
             let wanted = enabled && targets.contains(target)

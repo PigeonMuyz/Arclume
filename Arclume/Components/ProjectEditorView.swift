@@ -9,7 +9,11 @@ struct ProjectEditorView: View {
     @Binding var isPresented: Bool
     let initialGame: Game?
     @EnvironmentObject private var library: LibraryPageGlobals
-    @State private var showMetadata = false
+    private enum Pane: String, CaseIterable { case information = "项目信息", artwork = "外观图片", metadata = "匹配资料" }
+    @State private var pane: Pane = .information
+    @State private var selection = ProjectMetadataSelection()
+    @State private var original: ProjectPresentation?
+    @State private var showDiscardConfirmation = false
     @State private var name = ""
     @State private var summary = ""
     @State private var background = ""
@@ -20,69 +24,130 @@ struct ProjectEditorView: View {
     @State private var results: [GameDBSearchResult] = []
     @State private var preview: GameDBMetadata?
     @State private var steamPreview: SteamGame?
+    @State private var appStoreResults: [AppStoreCatalogItem] = []
+    @State private var appStorePreview: AppStoreCatalogItem?
+    @State private var appStoreMacOnly = true
+    @State private var storefront = GameMetadataLanguage.current.appleStorefront
+    @State private var previewLogo: String?
+    @State private var previewBackground: String?
     @State private var previewSourceID: String?
     @State private var busy = false
     @State private var message: String?
     @State private var adoptedSource: ProjectPresentation.MetadataSource?
 
     var body: some View {
-        Modal(initialGame == nil ? "添加项目" : "编辑项目信息", showModal: $isPresented, scrollable: false, subdued: true) {
-            VStack(spacing: 20) {
+        Modal(initialGame == nil ? "添加项目" : "编辑项目信息", showModal: $isPresented, scrollable: false,
+              subdued: true, onClose: requestDismiss) {
+            VStack(spacing: 18) {
                 HStack(alignment: .top, spacing: 28) {
-                    VStack(alignment: .leading, spacing: 22) {
-                        ProjectArtworkPreview(title: "背景", value: $background, fallback: automaticBackground)
-                        ProjectArtworkPreview(title: "游戏标志", value: $logo, fallback: automaticLogo,
-                                              fallbackImage: automaticLogoImage, logo: true)
-                        Text("图片仅用于启动器外观。")
-                            .font(.caption).foregroundStyle(.tertiary)
-                    }.frame(width: 284)
+                    ProjectEditorPreview(game: initialGame, name: displayed.name ?? name,
+                                         summary: displayed.summary ?? summary,
+                                         backgroundURL: imageURL(displayed.background) ?? automaticBackground,
+                                         logoURL: imageURL(displayed.logo) ?? automaticLogo,
+                                         logoImage: imageURL(displayed.logo) == nil ? automaticLogoImage : nil)
+                        .frame(width: 400)
                     VStack(alignment: .leading, spacing: 18) {
-                        HStack(spacing: 14) {
-                            if let game = initialGame { LauncherApplicationIcon(game: game, size: 52) }
-                            else { Image(systemName: "app.dashed").font(.largeTitle).foregroundStyle(.secondary) }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(name.isEmpty ? "新项目" : name).font(.title2.weight(.semibold)).lineLimit(2)
-                                Text(initialGame?.isNative == true ? "macOS 应用" : "Windows 应用")
-                                    .font(.subheadline).foregroundStyle(.secondary)
-                            }
-                        }.padding(.bottom, 4)
-                        basics
-                        Divider()
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("游戏资料").font(.subheadline.weight(.medium))
-                                Text(initialGame.flatMap { GamePresentationProfiles.profile(for: $0) } != nil ? "已使用官方适配" : "从资料库补全名称与简介")
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button("匹配资料…") { showMetadata = true }
-                                .popover(isPresented: $showMetadata) {
-                                    ScrollView { metadata.padding(22) }
-                                        .frame(width: 410, height: initialGame.flatMap { GamePresentationProfiles.profile(for: $0) } != nil ? 140 : 410)
+                        Picker("编辑内容", selection: $pane) {
+                            ForEach(Pane.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }.pickerStyle(.segmented)
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 18) {
+                                switch pane {
+                                case .information:
+                                    basics
+                                    Divider()
+                                    Label(sourceLabel, systemImage: "checkmark.seal")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                    Button("匹配游戏资料…") { message = nil; pane = .metadata }
+                                        .buttonStyle(.glass)
+                                case .artwork:
+                                    ProjectArtworkPreview(title: "背景图片", value: $background, fallback: automaticBackground)
+                                    ProjectArtworkPreview(title: "游戏标志", value: $logo, fallback: automaticLogo,
+                                                          fallbackImage: automaticLogoImage, logo: true)
+                                    Text("背景与标志独立设置；恢复自动后使用游戏原有资料。")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                case .metadata: metadata
                                 }
+                            }.frame(maxWidth: .infinity, alignment: .leading).padding(2)
                         }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }.frame(maxHeight: .infinity, alignment: .top)
+                    }.frame(width: 310, height: 448)
+                }
                 Divider()
                 HStack(spacing: 10) {
                     if let message { Text(message).font(.caption).foregroundStyle(.secondary).lineLimit(2) }
                     Spacer()
-                    Button("取消") { isPresented = false }.buttonStyle(.glass)
-                    Button("保存", action: save).buttonStyle(.glassProminent)
-                        .keyboardShortcut(.defaultAction)
-                        .disabled(busy || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (initialGame == nil && newExecutable == nil))
+                    if pane == .metadata {
+                        Button("返回") { pane = .information }.buttonStyle(.glass)
+                        Button("采用所选资料", action: adoptMetadata).buttonStyle(.glassProminent)
+                            .disabled(busy || !hasCandidate || !(selection.text || selection.background || selection.logo))
+                    } else {
+                        Button("取消", action: requestDismiss).buttonStyle(.glass)
+                        Button("保存", action: save).buttonStyle(.glassProminent)
+                            .keyboardShortcut(.defaultAction)
+                            .disabled(busy || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (initialGame == nil && newExecutable == nil))
+                    }
                 }.controlSize(.large)
-            }.padding(6).frame(width: 740, height: 464)
+            }.padding(6).frame(width: 738, height: 510)
         }
+        .interactiveDismissDisabled(hasChanges || busy)
+        .alert("放弃未保存的修改？", isPresented: $showDiscardConfirmation) {
+            Button("继续编辑", role: .cancel) {}
+            Button("放弃修改", role: .destructive) { isPresented = false }
+        } message: { Text("已采用的资料和外观修改尚未保存。") }
         .onAppear {
-            guard let game = initialGame else { return }
-            name = game.name; summary = game.shortDescription
-            let edited = ProjectPresentationStore.read()[game.id]
-            background = edited?.background ?? OnlineGamePresentationStore.presentation(for: game.id).selectedArtworkURLString ?? ""
-            logo = edited?.logo ?? OnlineGamePresentationStore.presentation(for: game.id).logoURLString ?? ""
-            query = game.name
+            guard original == nil else { return }
+            if let game = initialGame {
+                name = game.name; summary = game.shortDescription
+                let edited = ProjectPresentationStore.read()[game.id]
+                background = edited?.background ?? OnlineGamePresentationStore.presentation(for: game.id).selectedArtworkURLString ?? ""
+                logo = edited?.logo ?? OnlineGamePresentationStore.presentation(for: game.id).logoURLString ?? ""
+                adoptedSource = edited?.metadataSource
+                query = game.name
+            }
+            original = draft
         }
+    }
+
+    private var draft: ProjectPresentation {
+        ProjectPresentation(name: name, summary: summary, background: background, logo: logo, metadataSource: adoptedSource)
+    }
+    private var hasChanges: Bool { original.map { $0 != draft } == true || newExecutable != nil }
+    private var hasCandidate: Bool { preview != nil || steamPreview != nil || appStorePreview != nil }
+    private var sourceLabel: String {
+        if let game = initialGame, GamePresentationProfiles.profile(for: game) != nil { return "官方启动器适配" }
+        switch adoptedSource?.provider {
+        case "steam": return "Steam 商店资料"
+        case "appstore": return "Apple App Store 资料"
+        case "gamedb": return "GameDB / IGDB 资料"
+        default: return "本地项目信息"
+        }
+    }
+    private var candidate: ProjectPresentation {
+        ProjectPresentation(
+            name: appStorePreview?.trackName ?? steamPreview?.name ?? preview?.preferredName,
+            summary: appStorePreview?.description ?? steamPreview?.shortDescription ?? preview?.preferredSummary,
+            background: appStorePreview?.background ?? previewBackground ?? steamPreview?.screenshots?.first?.pathFull
+                ?? preview?.screenshots?.first.flatMap { GameDBMetadataService.artworkURL($0, size: "t_screenshot_big") },
+            logo: previewLogo,
+            metadataSource: previewSourceID.map { .init(provider: provider == 0 ? "gamedb" : provider == 1 ? "steam" : "appstore",
+                                                       id: $0, language: provider == 2 ? storefront : GameMetadataLanguage.current.steamStoreLanguage) })
+    }
+    private var displayed: ProjectPresentation {
+        pane == .metadata && hasCandidate ? selection.applying(candidate, to: draft) : draft
+    }
+    private func imageURL(_ value: String?) -> URL? {
+        guard let value, !value.isEmpty else { return nil }
+        return URL(string: value)
+    }
+    private func requestDismiss() {
+        if hasChanges { showDiscardConfirmation = true } else { isPresented = false }
+    }
+    private func adoptMetadata() {
+        let adopted = selection.applying(candidate, to: draft)
+        name = adopted.name ?? name; summary = adopted.summary ?? summary
+        background = adopted.background ?? background; logo = adopted.logo ?? logo
+        adoptedSource = adopted.metadataSource
+        message = "已填入草稿，保存后生效。"; pane = .information
     }
 
     private var basics: some View {
@@ -139,37 +204,69 @@ struct ProjectEditorView: View {
                 Picker("来源", selection: $provider) {
                     Text("GameDB / IGDB").tag(0)
                     Text("Steam 商店").tag(1)
-                }.disabled(busy).onChange(of: provider) { _, _ in preview = nil; steamPreview = nil; results = []; query = "" }
+                    Text("App Store").tag(2)
+                }.disabled(busy).onChange(of: provider) { _, _ in clearPreview(); results = []; appStoreResults = []; query = "" }
+                if provider == 2 {
+                    Picker("平台", selection: $appStoreMacOnly) {
+                        Text("Mac").tag(true)
+                        Text("iPhone / iPad").tag(false)
+                    }.pickerStyle(.segmented).disabled(busy)
+                        .onChange(of: appStoreMacOnly) { _, _ in clearPreview(); appStoreResults = [] }
+                    Picker("商店地区", selection: $storefront) {
+                        Text("中国大陆").tag("cn")
+                        Text("美国").tag("us")
+                    }.disabled(busy).onChange(of: storefront) { _, _ in clearPreview(); appStoreResults = [] }
+                }
                 HStack {
-                    TextField(provider == 0 ? "游戏名称（支持英文原名）" : "Steam App ID 或商店链接", text: $query)
+                    TextField(provider == 0 ? "游戏名称（支持英文原名）" : provider == 1 ? "Steam App ID 或商店链接" : "应用名称、App ID 或 App Store 链接", text: $query)
                         .textFieldStyle(.roundedBorder).onSubmit(search)
                     Button("查询", action: search).disabled(busy || query.isEmpty)
                 }
                 Text("优先获取当前应用语言的资料。先预览再采用，不改变本地运行配置。")
                     .font(.caption).foregroundStyle(.secondary)
                 if busy { ProgressView().controlSize(.small) }
+                if let message { Text(message).font(.caption).foregroundStyle(.secondary) }
                 ForEach(results) { result in
                     Button(result.name) { loadDetails(result.id) }.buttonStyle(.borderless).disabled(busy)
                 }
-                if preview != nil || steamPreview != nil {
-                    Divider()
-                    Text(steamPreview?.name ?? preview?.preferredName ?? "").font(.headline)
-                    Text(steamPreview?.shortDescription ?? preview?.preferredSummary ?? "暂无简介")
-                        .font(.callout).lineLimit(5)
-                    Button("采用这份资料") {
-                        name = steamPreview?.name ?? preview?.preferredName ?? name
-                        summary = steamPreview?.shortDescription ?? preview?.preferredSummary ?? summary
-                        background = steamPreview?.screenshots?.first?.pathFull
-                            ?? preview?.screenshots?.first.flatMap { GameDBMetadataService.artworkURL($0, size: "t_screenshot_big") } ?? background
-                        message = "已填入草稿，点击保存后生效。"
-                        if let previewSourceID { adoptedSource = ProjectPresentation.MetadataSource(
-                            provider: provider == 0 ? "gamedb" : "steam",
-                            id: previewSourceID,
-                            language: GameMetadataLanguage.current.steamStoreLanguage) }
-                        showMetadata = false
-                    }.buttonStyle(.glass).disabled(busy)
+                ForEach(appStoreResults) { result in
+                    Button {
+                        appStorePreview = result; previewSourceID = String(result.id)
+                    } label: {
+                        HStack(spacing: 10) {
+                            KFImage(result.iconURL).resizable().scaledToFit().frame(width: 32, height: 32)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(result.trackName).lineLimit(2)
+                                Text("\(result.platformLabel) · \(result.artistName ?? "App Store")")
+                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer()
+                            if appStorePreview?.id == result.id { Image(systemName: "checkmark") }
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(busy)
                 }
-                Link("资料来源：GameDB / IGDB", destination: URL(string: "https://github.com/LizardByte/GameDB")!)
+                if preview != nil || steamPreview != nil || appStorePreview != nil {
+                    Divider()
+                    Text(appStorePreview?.trackName ?? steamPreview?.name ?? preview?.preferredName ?? "").font(.headline)
+                    if let previewLogo, let url = URL(string: previewLogo) {
+                        KFImage(url).resizable().scaledToFit().frame(height: 64)
+                    }
+                    Text(appStorePreview?.description ?? steamPreview?.shortDescription ?? preview?.preferredSummary ?? "暂无简介")
+                        .font(.callout).lineLimit(5)
+                    if let item = appStorePreview {
+                        Text("\(item.platformLabel) · \(storefront.uppercased()) 商店。仅采用展示资料，不更改运行平台。App Store 不提供透明游戏标志。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if !busy && previewLogo == nil {
+                        Text("未获取到游戏标志，将保留当前标志。").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Toggle("名称与简介", isOn: $selection.text)
+                    Toggle("背景图片", isOn: $selection.background).disabled(candidate.background == nil)
+                    Toggle("游戏标志", isOn: $selection.logo).disabled(candidate.logo == nil)
+                    Text("未提供的图片会保留当前设置。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Link(provider == 0 ? "资料来源：GameDB / IGDB" : provider == 1 ? "资料来源：Steam" : "资料来源：Apple App Store",
+                     destination: URL(string: provider == 0 ? "https://github.com/LizardByte/GameDB" : provider == 1 ? "https://store.steampowered.com" : "https://apps.apple.com")!)
                     .font(.caption)
             }
         }
@@ -177,7 +274,7 @@ struct ProjectEditorView: View {
 
     private func search() {
         guard !busy, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        busy = true; message = nil; results = []; preview = nil; steamPreview = nil
+        busy = true; message = nil; results = []; appStoreResults = []; clearPreview()
         let input = query; let source = provider
         Task {
             defer { busy = false }
@@ -185,29 +282,47 @@ struct ProjectEditorView: View {
                 if source == 0 {
                     results = try await GameDBMetadataService.shared.search(input)
                     if results.isEmpty { message = "没有找到结果，可尝试英文原名或 Steam 商店链接。" }
-                } else {
+                } else if source == 1 {
                     guard let id = SteamMetadataLinkParser.appID(from: input) else { message = "请输入有效的 Steam App ID 或商店链接。"; return }
                     steamPreview = try await api.fetchGameInfo(appID: String(id), forceRefresh: true, source: .steamStore)
                     previewSourceID = String(id)
                     if steamPreview == nil { message = "没有找到对应资料。" }
+                    else { await loadSteamArtwork(id) }
+                } else {
+                    appStoreResults = try await AppStoreCatalogService.shared.search(input, country: storefront, macOnly: appStoreMacOnly)
+                    if appStoreResults.isEmpty { message = "当前地区没有结果，可切换商店地区或尝试 App Store 链接。" }
                 }
             } catch { message = error.localizedDescription }
         }
     }
 
     private func loadDetails(_ id: Int) {
-        busy = true; message = nil
+        busy = true; message = nil; clearPreview()
         Task {
             defer { busy = false }
-            do { preview = try await GameDBMetadataService.shared.details(id: id); previewSourceID = String(id) }
+            do {
+                preview = try await GameDBMetadataService.shared.details(id: id); previewSourceID = String(id)
+                if let raw = preview?.external_games?.first(where: { $0.external_game_source?.name == "Steam" })?.uid,
+                   let steamID = Int(raw), steamID > 0 { await loadSteamArtwork(steamID) }
+            }
             catch { message = error.localizedDescription }
         }
     }
 
+    private func clearPreview() {
+        preview = nil; steamPreview = nil; appStorePreview = nil
+        previewSourceID = nil; previewLogo = nil; previewBackground = nil
+    }
+
+    private func loadSteamArtwork(_ id: Int) async {
+        let artwork = await SteamProjectArtworkService.shared.artwork(appID: id)
+        previewLogo = artwork.logo; previewBackground = artwork.background
+    }
+
     private func save() {
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        for value in [background, logo] where !value.isEmpty {
-            guard let url = URL(string: value), ["https", "http", "file"].contains(url.scheme?.lowercased() ?? "") else {
+        for value in [background, logo] {
+            guard ProjectEditorValidation.imageAddress(value) else {
                 message = "图片地址必须为 http、https 或本地文件。"; return
             }
         }

@@ -307,6 +307,11 @@ jobs:
                 printf '%s' '本次未配置发布签名凭据，DMG 未签名、未公证；应用内更新会在 SHA-256、Bundle ID 和版本/构建号校验后安装。'
               fi)")
 
+          release_summary="CHANGELOG/released/${TAG#v}.md"
+          if [ -f "$release_summary" ]; then
+            notes="$(cat "$release_summary")"$'\n\n'"$notes"
+          fi
+
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \

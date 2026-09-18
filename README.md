@@ -1,10 +1,10 @@
 # Arclume
 
-> 独立、社区驱动的 macOS 游戏启动器。
+> Arclume 2.0 · 全新 UI 设计，为 Mac 打造的统一游戏启动器。
 
 [简体中文](#简体中文) · [English](#english)
 
-![Arclume](https://github.com/user-attachments/assets/6ed53e07-5a66-4ada-90d6-f6134e7a275b)
+![Arclume 2.0 宽屏启动器](docs/screenshots/launcher-2.0.png)
 
 ## 简体中文
 
@@ -12,18 +12,26 @@ Arclume 用一个本地游戏库管理 macOS 原生游戏、Steam 原生游戏�
 
 ### 功能
 
-- 导入多个 Steam Library，并区分 macOS 原生游戏、CrossOver 游戏和 Arclume Wine 游戏。
-- 扫描 `/Applications` 和 `~/Applications` 中声明为 Game 的原生 App。
-- 提供原生、CrossOver 与未经验证的运行状态，以及每游戏的兼容性记录。
-- 支持每游戏的 CrossOver 图形后端、启动参数、环境变量与其他运行选项。
-- 提供 Arclume Wine Runtime：D3DMetal 3 / 4、DXVK、msync、Metal HUD 和剑网 3 的独立 Games 容器。
-- 使用公开 Steam Store 数据、可选本地代理和 App Store 元数据补充游戏信息与封面。
-- 提供应用和 Runtime 的独立更新检查、镜像源与自定义更新源。
+- **宽屏启动器**：游戏背景、标志与资讯，随应用图标取色的玻璃操作按钮。
+- **图标侧栏与启动台**：侧栏可收起、拖动排序、悬停查看名称；启动台只显示已安装项目，支持搜索。下次打开会记住上次选择。
+- **自动发现游戏**：扫描已安装的原生 App 和 Steam 游戏，支持多个 Steam 库；已有游戏库先显示，后台增量刷新。
+- **统一运行环境**：Windows 应用使用 `Application Support/Arclume/ALBottles`；旧版容器通过应用内升级流程迁移。Steam 和剑网3启动器均可选配置。
+- **新的设置与项目编辑**：管理运行选项，匹配 Steam、App Store 等来源的名称、简介、背景与标志；优先采用当前应用语言的资料。
+- **首次使用引导**：全窗口欢迎页、真实功能区域的箭头指引，以及可选的迁移与初始化流程。
+- **独立 Runtime 更新**：D3DMetal 3 / 4、DXVK、msync、Metal HUD；应用和运行环境分别检查更新。
+
+![已安装应用启动台](docs/screenshots/launchpad-2.0.png)
+
+以上为新版程序的实际截图。游戏图片、名称与标志归各自权利人所有，不代表合作或背书。
+
+### YY 兼容性说明
+
+此版本附带 YY 专用 DNS／频道软件渲染适配和 Wine 加载锁顺序补丁。**YY 在麦序模式下可能仍出现交互无响应。** 普通模式单次测试正常不等于所有频道或长期语音会话均稳定；遇到问题请保留现场并提供脱敏日志。
 
 ### 系统要求
 
 - macOS 26.0 或更高版本。
-- Windows Steam 游戏可在设置中选择 CrossOver，或使用 Arclume Wine 的独立 Steam 容器；后者不需要安装 CrossOver。
+- Arclume Wine 无需安装 CrossOver；Steam 也不是使用 Arclume 的前提。
 - Arclume Wine Runtime 仅面向 x86_64 Windows 游戏；Apple Silicon Mac 通过 Rosetta 运行其 Wine 进程。
 
 ### 安装与更新
@@ -37,7 +45,7 @@ Release 提供两种 DMG：
 
 每个 DMG 都附带 SHA-256 文件。应用内更新会下载 Release 的 DMG，校验 SHA-256、Bundle ID 和版本/构建号后覆盖安装并重启；因此未配置 Developer ID 证书的 Actions 产物也可作为更新来源。Developer ID 签名与公证状态以对应 Release 说明为准。
 
-应用内更新不会覆盖用户的 `Games`、Steam 或 CrossOver 容器。Runtime 更新会检查 Manifest、ABI 与 SHA-256，并以原子替换方式更新运行时本体。
+应用替换与 Runtime 更新不覆盖游戏、存档或用户 Prefix。旧版统一容器升级是单独的应用内迁移流程；迁移完成并校验后清理旧容器，不保留重复副本。Runtime 更新检查 Manifest、ABI 与 SHA-256，并以原子替换方式更新运行时本体。
 
 ### 项目结构
 
@@ -106,15 +114,17 @@ Arclume is an independent, community-driven macOS game launcher. It manages nati
 
 ### Highlights
 
-- Multiple Steam Library imports, native/CrossOver discovery, and native Game-app scanning.
-- Per-game compatibility data, launch options, graphics backends, environment variables, and metadata artwork.
-- An independently versioned Arclume Wine Runtime with D3DMetal 3/4, DXVK, msync, Metal HUD, and a dedicated JX3 Games prefix.
+- A redesigned widescreen launcher, collapsible/reorderable icon sidebar, installed-app launchpad, and remembered selection.
+- Automatic discovery of installed native and Steam games, with cached startup and background refresh across multiple Steam libraries.
+- A unified ALBottles environment with an in-app legacy migration flow. Steam and JX3 setup are optional.
+- Redesigned settings, project editing, localized Steam/App Store metadata matching, artwork, and guided onboarding.
+- An independently versioned Arclume Wine Runtime with D3DMetal 3/4, DXVK, msync and Metal HUD.
 - Separate application and Runtime update checks, automatic fallback, built-in mirrors, and custom HTTPS update sources.
 
 ### Requirements
 
 - macOS 26.0 or later.
-- CrossOver is user-supplied for Windows Steam games.
+- CrossOver is not required to use Arclume Wine; Steam installation is optional.
 - The bundled Runtime targets x86_64 Windows software; Wine runs through Rosetta on Apple Silicon Macs.
 
 ### Distribution
@@ -124,7 +134,11 @@ Each Release contains two DMGs and matching SHA-256 files. Developer ID signing 
 - `with-runtime` includes the verified Wine archive for first-run or offline setup.
 - `no-runtime` is smaller and is intended for users who already have a Runtime; the Runtime can be downloaded in **Settings → Updates**.
 
-Application updates verify the DMG SHA-256, bundle ID, and version/build before staging, replacing, and restarting; they do not require matching Developer ID signatures. They never replace a user's `Games` prefix. Runtime updates validate their Manifest, ABI and SHA-256, then atomically replace only the immutable runtime files.
+Application updates verify the DMG SHA-256, bundle ID, and version/build before staging, replacing, and restarting; they do not require matching Developer ID signatures. Runtime updates validate their Manifest, ABI and SHA-256, then atomically replace only the runtime files. Legacy container migration is a separate in-app upgrade flow; verified old containers are removed after migration rather than retained as duplicate copies.
+
+### Known YY limitation
+
+The release includes YY-specific DNS/software-rendering support and a Wine loader-lock ordering fix. **YY may still become unresponsive in microphone-queue mode.** Successful normal-mode testing is not a guarantee for all channels or long-running voice sessions.
 
 ### Contributing
 

@@ -97,6 +97,7 @@ struct LibraryTitlebar: ToolbarContent {
                 }
                 .help(L10n.string("Options"))
                 .accessibilityIdentifier("library-settings-button")
+                .launcherTourTarget(.settings)
             }
         } else {
             if isLauncherPresentation {
@@ -121,6 +122,7 @@ struct LibraryTitlebar: ToolbarContent {
                 }
                 .help(L10n.string("Options"))
                 .accessibilityIdentifier("library-settings-button")
+                .launcherTourTarget(.settings)
             }
         }
         if !isOnlineMode && !isLauncherPresentation {

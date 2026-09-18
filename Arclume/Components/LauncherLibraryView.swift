@@ -6,7 +6,7 @@ struct LauncherLibraryView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("launcher.gameOrder.v1", store: UserDefaults(suiteName: suiteName)) private var savedOrder = "[]"
     @AppStorage("launcher.sidebarExpanded", store: UserDefaults(suiteName: suiteName)) private var expanded = true
-    @SceneStorage("launcher.selectedGameID") private var selectionID = ""
+    @AppStorage("launcher.lastSelectedGameID.v1", store: UserDefaults(suiteName: suiteName)) private var selectionID = ""
     @State private var hoveredGameID: String?
     @State private var insertion: LauncherSidebarInsertion?
     @State private var drag: LauncherSidebarDrag?
@@ -15,6 +15,10 @@ struct LauncherLibraryView: View {
     @Binding var selectedTitle: String
     let onLaunchJX3: (Game) -> Void
     let onStopJX3: () -> Void
+    var showingTour = false
+    var previewGame: Game? = nil
+    var previewPresentation: ProjectPresentation? = nil
+    private var railVisible: Bool { expanded || showingTour }
     private let sidebarWidth: CGFloat = 74
 
     private var orderedIDs: [String] {
@@ -28,7 +32,7 @@ struct LauncherLibraryView: View {
         return visible.sorted { ranks[$0.id, default: .max] < ranks[$1.id, default: .max] }
     }
 
-    private var selection: Game? { games.first { $0.id == selectionID } ?? games.first }
+    private var selection: Game? { previewGame ?? games.first { $0.id == selectionID } ?? games.first }
 
     private var catalogGames: [Game] {
         let byID = Dictionary(library.allGames.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
@@ -39,7 +43,8 @@ struct LauncherLibraryView: View {
         GlassEffectContainer(spacing: 16) {
         ZStack(alignment: .leading) {
             if let game = selection {
-                LauncherGameHomeView(game: game, onLaunchJX3: { onLaunchJX3(game) }, onStopJX3: onStopJX3)
+                LauncherGameHomeView(game: game, onLaunchJX3: { onLaunchJX3(game) }, onStopJX3: onStopJX3,
+                                    presentationOverride: previewPresentation, isPreview: previewGame != nil)
                     .id(game.id)
             } else {
                 ContentUnavailableView("还没有已安装的游戏", systemImage: "gamecontroller", description: Text("从右上角的添加按钮添加游戏。"))
@@ -106,14 +111,15 @@ struct LauncherLibraryView: View {
                     .scrollIndicators(.hidden)
                     .frame(width: sidebarWidth)
                     .glassEffect(in: .rect(cornerRadius: 22))
+                    .launcherTourTarget(.sidebar)
                     .padding(.top, 72)
                     .padding(.bottom, 122)
                     // Keep the glass rail mounted: animate its actual position instead
                     // of relying on insertion/removal of a lazy scroll view.
-                    .offset(x: expanded || reduceMotion ? 0 : -(sidebarWidth + 28))
-                    .opacity(expanded ? 1 : 0)
-                    .allowsHitTesting(expanded)
-                    .accessibilityHidden(!expanded)
+                    .offset(x: railVisible || reduceMotion ? 0 : -(sidebarWidth + 28))
+                    .opacity(railVisible ? 1 : 0)
+                    .allowsHitTesting(railVisible)
+                    .accessibilityHidden(!railVisible)
                     .animation(reduceMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.35), value: expanded)
             }
             .padding(.leading, 14)
@@ -132,6 +138,7 @@ struct LauncherLibraryView: View {
                 .keyboardShortcut("f", modifiers: .command)
                 .accessibilityLabel("全部游戏")
                 .accessibilityIdentifier("launcher.all-games")
+                .launcherTourTarget(.allGames)
             Button {
                 hoveredGameID = nil
                 insertion = nil
@@ -147,6 +154,7 @@ struct LauncherLibraryView: View {
             .help(expanded ? "收起游戏列表" : "展开游戏列表")
             .accessibilityLabel(expanded ? "收起游戏列表" : "展开游戏列表")
             .accessibilityIdentifier("launcher.toggleSidebar")
+            .launcherTourTarget(.collapse)
             }
             .frame(width: sidebarWidth)
             .padding(.leading, 14)
@@ -196,7 +204,8 @@ struct LauncherLibraryView: View {
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: showAllGames)
         .onChange(of: selection?.name, initial: true) { _, name in selectedTitle = name ?? "Arclume" }
         .onChange(of: games.map(\.id), initial: true) { _, ids in
-            if !ids.contains(selectionID) { selectionID = games.first?.id ?? ids.first ?? "" }
+            // The visible fallback must not overwrite the user's last click while
+            // cached games and background discovery arrive in separate batches.
             if let drag, !ids.contains(drag.source) { self.drag = nil; insertion = nil }
         }
     }

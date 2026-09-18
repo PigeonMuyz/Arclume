@@ -106,13 +106,16 @@ struct GameHeader: View {
                 }
                 .font(.headline)
                 .frame(maxWidth: .infinity, minHeight: 32)
+                .padding(.horizontal, 18)
+                .padding(.vertical, 8)
+                .contentShape(Capsule())
             }
             .buttonStyle(.plain)
-            .padding(.horizontal, 18).padding(.vertical, 8)
             .foregroundStyle(.white)
             .glassEffect(.regular.tint(iconAccent.opacity(0.45)).interactive(), in: .capsule)
             .disabled(libraryPageGlobals.isStoppingWine || libraryPageGlobals.isLaunchingGame || game?.isInstalled != true || game?.downloadProgress != 100)
             .accessibilityIdentifier("launcher.primaryAction")
+            .launcherTourTarget(.play)
             Menu {
                 Button(action: revealInstallation) {
                     Label("打开安装目录", systemImage: "folder")
@@ -138,8 +141,18 @@ struct GameHeader: View {
             .help("更多操作")
             .accessibilityLabel("更多操作")
             .accessibilityIdentifier("launcher.more")
+            .launcherTourTarget(.more)
         }
         .controlSize(.large)
+        // Measure the layout slots outside the glass/button hosts. Native controls
+        // can move their own background views into hidden rendering subtrees.
+        .background {
+            HStack(spacing: 10) {
+                Color.clear.frame(maxWidth: .infinity).launcherTourTarget(.play)
+                Color.clear.frame(width: 48).launcherTourTarget(.more)
+            }
+            .allowsHitTesting(false)
+        }
     }
 
     private var detailControls: some View {

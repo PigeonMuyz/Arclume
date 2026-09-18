@@ -160,47 +160,29 @@ struct OptionsView: View {
 
     private var settingsContent: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    Image("Arclume").resizable().scaledToFit().frame(width: 36, height: 36)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Arclume").font(.headline)
-                        Text(applicationVersion).font(.caption).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Arclume").font(.title2.weight(.semibold))
+                    Text(applicationVersion).font(.caption).foregroundStyle(.secondary)
+                }.padding(.horizontal, 22).padding(.top, 28)
+                List(selection: $selectedSettingsPage) {
+                    ForEach(settingsPages, id: \.0) { page in
+                        Label(page.0 == "运行时" ? "运行环境" : page.0, systemImage: page.1)
+                            .padding(.vertical, 6).tag(page.0)
                     }
-                }.padding(.horizontal, 18).padding(.top, 20).padding(.bottom, 10)
-            List(selection: $selectedSettingsPage) {
-                ForEach(settingsPages, id: \.0) { page in
-                    Label(page.0, systemImage: page.1).padding(.vertical, 3).tag(page.0)
                 }
-            }
-            .listStyle(.sidebar).scrollContentBackground(.hidden)
-            }.frame(width: 184)
+                .listStyle(.sidebar).scrollContentBackground(.hidden)
+            }.frame(width: 180).background(.quaternary.opacity(0.35))
             Divider()
             VStack(alignment: .leading, spacing: 0) {
-                Text(selectedSettingsPage).font(.title2.weight(.semibold))
-                    .padding(.horizontal, 24).padding(.top, 24).padding(.bottom, 4)
+                Text(selectedSettingsPage == "运行时" ? "运行环境" : selectedSettingsPage)
+                    .font(.title.weight(.semibold))
+                    .padding(.horizontal, 28).padding(.top, 28).padding(.bottom, 8)
                 Form {
                     switch selectedSettingsPage {
                     case "运行时":
                         settingsCard { standardRuntimeSection }
-                        if standardGameRuntime == .crossOver {
-                            settingsCard { crossOverSection }
-                            settingsCard {
-                                steamBottleSection
-                                if !appGlobals.selectedBottle.isEmpty {
-                                    Divider()
-                                    steamInstallationSection
-                                }
-                            }
-                            settingsCard { dependencySection }
-                        } else {
-                            settingsCard { bundledSteamPrefixSection }
-                        }
                     case "游戏库":
-                        settingsCard { GameLibrariesList(load: load) }
-                        if !appGlobals.selectedBottle.isEmpty {
-                            settingsCard { steamPathSection }
-                        }
                         Section {
                             LabeledContent("原生游戏") {
                                 Button("扫描应用…") { showNativeGameImport = true }
@@ -212,7 +194,6 @@ struct OptionsView: View {
                                 UserDefaults(suiteName: suiteName)?.removeObject(forKey: "hiddenInstalledGames.v1")
                                 Task { await load() }
                             }
-                            Text("不移动或删除文件，下次扫描将重新发现仍存在的游戏。").font(.footnote)
                         }
                     case "更新":
                         updateCard
@@ -229,9 +210,10 @@ struct OptionsView: View {
                 .formStyle(.grouped)
                 .scrollContentBackground(.hidden)
                 .controlSize(.regular)
+                .frame(maxWidth: .infinity)
             }
         }
-        .frame(width: 800, height: 510)
+        .frame(width: 840, height: 560)
     }
 
     private var modeSelectionCard: some View {
@@ -492,17 +474,10 @@ struct OptionsView: View {
 
     private var standardRuntimeSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("运行时")
+            Text("运行环境")
                 .font(.headline)
             Text("Arclume Wine").font(.title3)
-            Text("统一使用内置 Wine。旧 CrossOver 容器保留，不会自动迁移或删除。")
-                .font(.footnote).foregroundStyle(.secondary)
         }
-        .help(
-            standardGameRuntime == .bundledWine
-                ? "Windows 应用共用 ALBottles；Steam 可按需安装，不需要 CrossOver。"
-                : "普通 Windows 游戏使用你选择的 CrossOver Bottle。"
-        )
     }
 
     private var bundledSteamPrefixSection: some View {
@@ -654,37 +629,8 @@ struct OptionsView: View {
     }
 
     private var metadataSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(L10n.string("Game metadata"))
-                .font(.headline)
-            LabeledContent("补全资料", value: "GameDB / IGDB")
-            Text("通过「更多 → 编辑项目信息 → 匹配资料」补全。优先当前语言，缺失时使用原文。")
-                .font(.caption).foregroundStyle(.secondary)
-            Picker(L10n.string("Game metadata"), selection: $steamMetadataSource) {
-                ForEach(SteamMetadataSource.allCases) { source in
-                    Text(source.title).tag(source.rawValue)
-                }
-            }
-
-            Toggle(
-                L10n.string("Use Apple App Store metadata for native apps"),
-                isOn: $appleAppStoreMetadataEnabled
-            )
-            .onChange(of: appleAppStoreMetadataEnabled) { _, _ in
-                Task { await load() }
-            }
-
-            .help(L10n.string(
-                "Native apps use their bundle identifier to look up App Store descriptions, developers, and genres in the selected language."
-            ))
-
-            if steamMetadataSource == SteamMetadataSource.localProxy.rawValue {
-                Text(L10n.string("Start local_steam_proxy.py from the project folder before reloading the library."))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .onChange(of: steamMetadataSource) { _, _ in
+        Toggle("为原生 App 使用 App Store 元数据", isOn: $appleAppStoreMetadataEnabled)
+        .onChange(of: appleAppStoreMetadataEnabled) { _, _ in
             Task { await load() }
         }
     }
@@ -760,18 +706,10 @@ struct OptionsView: View {
                     Text(mode.title).tag(mode)
                 }
             }
-            Text(dependencyInstallMode == .automatic
-                ? "选择 CrossOver 时自动下载 GStreamer 和 DXMT。"
-                : "选择 CrossOver 时使用下面导入的本地压缩包，不会再发起网络下载。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
             HStack {
                 Button("导入 GStreamer 压缩包") { importDependency(.gstreamer) }
                 Button("导入 DXMT 压缩包") { importDependency(.dxmt) }
             }
-            Text("在 GitHub 或镜像下载不通时，可手动下载 Release 压缩包并在这里导入。导入的文件会先检查压缩包路径并保存到本地缓存。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
             if let dependencyImportMessage {
                 Text(dependencyImportMessage)
                     .font(.footnote)

@@ -67,6 +67,7 @@ struct ArclumeLibraryActions: View {
             }
             .menuIndicator(compactIcons ? .hidden : .automatic)
             .accessibilityIdentifier("library-add-game-button")
+            .launcherTourTarget(.add)
             .help("添加游戏或安装 Windows 程序")
 
             Menu {

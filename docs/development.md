@@ -45,6 +45,11 @@ xcodebuild \
 
 该脚本需要本地 `Arclume/Config.xcconfig`；不要提交它。
 
+运行脚本默认使用 Xcode 项目配置的 Apple Development 签名，需要对应团队的本地有效证书。
+不要用临时签名构建验证麦克风授权是否持久保存：临时签名的代码身份随构建变化，系统可能重新询问授权。
+没有证书时可以显式运行 `ARCLUME_CODE_SIGN_IDENTITY=- ./script/build_and_run.sh run`，但该产物不能作为隐私授权的验收版本。
+无签名预检仍保留，不需要开发证书。从临时签名切换到证书签名时可能需要重新授权一次；不得修改或重置 TCC 数据库来掩盖此差异。
+
 ## Runtime 接入
 
 本仓库不构建 Wine。Runtime Release 必须先由独立 Runtime 项目生成并验证，再使用：

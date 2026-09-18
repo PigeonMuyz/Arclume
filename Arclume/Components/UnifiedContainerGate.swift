@@ -6,6 +6,8 @@ import Combine
 final class UnifiedContainerMigrationModel: ObservableObject {
     static let shared = UnifiedContainerMigrationModel()
     @Published var ready = false
+    @Published var inspected = false
+    @Published var learnedDuringUpgrade = false
     @Published var busy = false
     @Published var plan: UnifiedContainerMigration.Plan?
     @Published var record: UnifiedContainerMigration.Journal?
@@ -16,13 +18,15 @@ final class UnifiedContainerMigrationModel: ObservableObject {
     @Published var progressLabel = "准备迁移"
     private var diagnostic: String?
     private let migration = UnifiedContainerMigration(root: ARCLUME_SUPPORT_FOLDER_URL)
+    private let demonstrationOnly: Bool
+    init(demonstrationOnly: Bool = false) { self.demonstrationOnly = demonstrationOnly }
 
     func inspect() {
-        guard !busy else { return }
+        guard !demonstrationOnly, !busy else { return }
+        defer { inspected = true }
         do {
             record = try migration.journal()
             ready = try !migration.requiresMigration()
-            if needsFinalization { finishUpgrade() }
         } catch {
             diagnostic = error.localizedDescription
             message = "暂时无法检查旧环境。请退出其他 Windows 程序后重试；原数据不会改变。"
@@ -32,7 +36,7 @@ final class UnifiedContainerMigrationModel: ObservableObject {
         record.map { [.complete, .cleaning].contains($0.phase) } == true
     }
     func finishUpgrade() {
-        guard !busy else { return }
+        guard !demonstrationOnly, !busy else { return }
         busy = true; transferring = true; message = nil
         progress = 1; progressLabel = "正在完成升级…"
         let engine = migration
@@ -58,7 +62,7 @@ final class UnifiedContainerMigrationModel: ObservableObject {
         try GameAssociatedDataService.requireRegistryIdle()
     }
     func check() {
-        guard !busy else { return }
+        guard !demonstrationOnly, !busy else { return }
         busy = true; message = "正在检查文件、注册表和盘符；旧容器不会改变。"; plan = nil
         let engine = migration
         Task {
@@ -73,7 +77,7 @@ final class UnifiedContainerMigrationModel: ObservableObject {
         }
     }
     func start() {
-        guard !busy, let plan, plan.conflicts.isEmpty else { return }
+        guard !demonstrationOnly, !busy, let plan, plan.conflicts.isEmpty else { return }
         busy = true; transferring = true; progress = 0; progressLabel = "准备迁移"; message = nil
         let engine = migration
         let report: @Sendable (Double, String) -> Void = { value, label in
@@ -98,7 +102,7 @@ final class UnifiedContainerMigrationModel: ObservableObject {
         }
     }
     func restore() {
-        guard !busy else { return }
+        guard !demonstrationOnly, !busy else { return }
         busy = true; message = "正在恢复原容器和偏好。迁移副本会保留，不删除其中的数据。"
         let engine = migration
         Task {
@@ -114,9 +118,11 @@ final class UnifiedContainerMigrationModel: ObservableObject {
         }
     }
     func showRecovery() {
+        guard !demonstrationOnly else { return }
         if let record { NSWorkspace.shared.open(migration.recoveryURL(record)) }
     }
     func exportDiagnostics() {
+        guard !demonstrationOnly else { return }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = "Arclume-迁移检查.txt"
         guard panel.runModal() == .OK, let url = panel.url else { return }
@@ -128,11 +134,26 @@ final class UnifiedContainerMigrationModel: ObservableObject {
 
 /// Do not instantiate ContentView/AppGlobals until the prefix transaction is settled.
 struct UnifiedContainerGate<Content: View>: View {
-    @StateObject private var model = UnifiedContainerMigrationModel.shared
+    @StateObject private var model: UnifiedContainerMigrationModel
+    private var isPreview = false
     @State private var started = false
     @State private var confirmMigration = false
     @State private var confirmRestore = false
     @ViewBuilder let content: () -> Content
+
+    init(@ViewBuilder content: @escaping () -> Content) {
+        _model = StateObject(wrappedValue: UnifiedContainerMigrationModel.shared)
+        self.content = content
+    }
+
+    #if DEBUG
+    init(preview: MigrationPreviewStage, @ViewBuilder content: @escaping () -> Content) {
+        _model = StateObject(wrappedValue: preview.model())
+        _started = State(initialValue: preview != .detected)
+        isPreview = true
+        self.content = content
+    }
+    #endif
 
     private var needsRecovery: Bool {
         model.record.map { [.copying, .switching].contains($0.phase) } == true && !model.completed
@@ -145,27 +166,27 @@ struct UnifiedContainerGate<Content: View>: View {
 
     var body: some View {
         Group {
-            if model.ready { content() }
+            if !model.inspected { ProgressView().frame(width: 1100, height: 650) }
+            else if model.ready { content() }
+            else if !model.learnedDuringUpgrade && model.record == nil && model.message == nil {
+                UpgradeTeachingView { model.learnedDuringUpgrade = true }
+                    .frame(width: 1100, height: 650)
+            }
             else {
-                VStack(spacing: 24) {
-                    HStack(alignment: .top, spacing: 26) {
-                        steps.frame(width: 200, alignment: .leading)
-                        Divider()
-                        stageContent.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    }
-                    Divider()
-                    HStack {
-                        Button("退出 App", systemImage: "xmark.circle") { NSApp.terminate(nil) }.disabled(model.busy)
-                        Spacer()
-                        actions
-                    }
+                OnboardingStage(title: "升级 Arclume", showsBrand: step == 0) {
+                    stageContent
+                } actions: {
+                    Button("暂不迁移并退出") { if !isPreview { NSApp.terminate(nil) } }.disabled(model.busy)
+                    Spacer()
+                    actions
                 }
                 .modifier(UpgradeButtonStyle())
                 .controlSize(.large)
-                .padding(30).frame(width: 800, height: 510)
+                .frame(width: 1100, height: 650)
             }
         }
-        .task { model.inspect() }
+        .allowsHitTesting(!isPreview)
+        .task { if !isPreview { model.inspect() } }
         .confirmationDialog("将旧容器安全合并为 ALBottles？", isPresented: $confirmMigration, titleVisibility: .visible) {
             Button("开始迁移") { model.start() }
             Button("取消", role: .cancel) { }
@@ -208,10 +229,7 @@ struct UnifiedContainerGate<Content: View>: View {
                 if model.busy { ProgressView("正在恢复…") }
                 Button("查看恢复副本") { model.showRecovery() }.disabled(model.busy)
             } else if step == 0 {
-                header("一个环境，管理所有应用", detail: "将已有 Windows 应用合并到 Arclume 的统一容器。")
-                Label("游戏、启动器和 YY 统一管理", systemImage: "square.stack.3d.up")
-                Label("自动整理并校验应用数据", systemImage: "checkmark.shield")
-                Label("外部游戏库留在原位置", systemImage: "externaldrive")
+                header("检测到旧版 Arclume 数据", detail: "是否迁移已有应用和配置？迁移后使用统一的 ALBottles 环境。")
                 Text("请先退出正在运行的 Windows 程序。下一步只会检查，不会立即迁移。")
                     .font(.callout).foregroundStyle(.secondary)
             } else if model.busy {

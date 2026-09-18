@@ -22,8 +22,6 @@ struct MicrophonePermissionView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("麦克风").font(.headline)
             Text(statusText).foregroundStyle(.secondary)
-            Text("需要游戏语音时再授权；启动游戏或预热 Wine 不会由 Arclume 主动申请权限。")
-                .font(.footnote).foregroundStyle(.secondary)
             HStack {
                 if status == .notDetermined {
                     Button("允许使用麦克风…") {

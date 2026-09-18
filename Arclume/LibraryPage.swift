@@ -32,9 +32,9 @@ struct LibraryPage: View {
     @AppStorage("unifiedLibraryOnboarding.v1", store: UserDefaults(suiteName: suiteName))
     private var completedUnifiedOnboarding = false
     @State private var showUnifiedOnboarding = false
-    @State private var showUnifiedJX3Setup = false
-    @State private var configureSteamAfterJX3 = false
     @State private var launcherTitle = "Arclume"
+    @StateObject private var tourRegistry = LauncherTourRegistry()
+    @State private var onboardingSetup: (steam: Bool, jx3: Bool)?
     
     var body: some View {
         ZStack {
@@ -55,6 +55,8 @@ struct LibraryPage: View {
                         }
                     }
                     .foregroundStyle(.white)
+                } else if showUnifiedOnboarding && !libraryPageGlobals.allGames.contains(where: \.isInstalled) {
+                    LauncherTourDemoView()
                 } else if (!isLoading && libraryPageGlobals.allGames.isEmpty) {
                     if OnlineGameMode.isEnabled {
                         OnlineGameSetupLandingView {
@@ -104,7 +106,8 @@ struct LibraryPage: View {
                             .foregroundStyle(.white)
                     }
                 } else {
-                    LauncherLibraryView(selectedTitle: $launcherTitle, onLaunchJX3: launchJX3Game, onStopJX3: forceQuitJX3Game)
+                    LauncherLibraryView(selectedTitle: $launcherTitle, onLaunchJX3: launchJX3Game, onStopJX3: forceQuitJX3Game,
+                                        showingTour: showUnifiedOnboarding)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -127,15 +130,6 @@ struct LibraryPage: View {
                     isPresented: $showOnlineRuntimeUpdate,
                     load: load
                 )
-            }
-            .sheet(isPresented: $showUnifiedJX3Setup, onDismiss: {
-                Task { await load() }
-                if configureSteamAfterJX3 {
-                    configureSteamAfterJX3 = false
-                    openSteamConfiguration()
-                }
-            }) {
-                UnifiedJX3SetupView()
             }
             .alert(
                 "无法启动剑网3",
@@ -214,7 +208,7 @@ struct LibraryPage: View {
                     isLoading = false
                     return
                 }
-                showUnifiedOnboarding = !completedUnifiedOnboarding
+                showUnifiedOnboarding = !completedUnifiedOnboarding || UnifiedContainerMigrationModel.shared.learnedDuringUpgrade
                 if OnlineGameMode.isEnabled,
                    !didOfferOnlineSetupGuide {
                     // A mode switch leaves the shared selection pointing at
@@ -271,20 +265,31 @@ struct LibraryPage: View {
                 }
             }
             .toolbar {
-                if !showUnifiedOnboarding { LibraryTitlebar(
+                LibraryTitlebar(
                     libraryPageGlobals: libraryPageGlobals,
                     load: load,
                     isOnlineMode: OnlineGameMode.isEnabled,
                     isLauncherPresentation: true
-                ) }
+                )
             }
             .environmentObject(libraryPageGlobals)
             .environmentObject(windowsInstallerStore)
-            .disabled(showUnifiedOnboarding)
-            .accessibilityHidden(showUnifiedOnboarding)
-            if showUnifiedOnboarding {
-                LibraryWelcomeView(onFinish: finishUnifiedOnboarding)
-                    .zIndex(20)
+            .accessibilityHidden(showUnifiedOnboarding || onboardingSetup != nil)
+            .disabled(onboardingSetup != nil)
+        }
+        .environment(\.launcherTour, tourRegistry)
+        .environmentObject(libraryPageGlobals)
+        .background(LauncherTourPresenter(active: showUnifiedOnboarding, registry: tourRegistry,
+                                         onFinish: finishUnifiedOnboarding,
+                                         startsAtSetup: UnifiedContainerMigrationModel.shared.learnedDuringUpgrade))
+        .overlay {
+            if let setup = onboardingSetup {
+                OnboardingSetupFlow(steam: setup.steam, jx3: setup.jx3) {
+                    onboardingSetup = nil
+                    Task { await load() }
+                }
+                .environmentObject(libraryPageGlobals)
+                .environmentObject(windowsInstallerStore)
             }
         }
     }
@@ -341,19 +346,8 @@ struct LibraryPage: View {
     private func finishUnifiedOnboarding(steam: Bool, jx3: Bool) {
         completedUnifiedOnboarding = true
         showUnifiedOnboarding = false
-        if jx3 {
-            configureSteamAfterJX3 = steam
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { showUnifiedJX3Setup = true }
-        } else if steam {
-            openSteamConfiguration()
-        }
-    }
-
-    private func openSteamConfiguration() {
-        libraryPageGlobals.requestedSettingsPage = "运行时"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            libraryPageGlobals.showOptions = true
-        }
+        UnifiedContainerMigrationModel.shared.learnedDuringUpgrade = false
+        if steam || jx3 { onboardingSetup = (steam, jx3) }
     }
 
     @MainActor

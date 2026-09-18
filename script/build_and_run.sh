@@ -37,16 +37,25 @@ fi
 
 pkill -x "$PROCESS_NAME" >/dev/null 2>&1 || true
 
+# Keep the project's Apple Development identity across local replacements so
+# macOS privacy grants can follow the app's designated requirement. Ad-hoc
+# signing binds grants to a changing code hash and is only an explicit opt-in.
+SIGNING_ARGS=("SWIFT_EMIT_LOC_STRINGS=NO")
+if [[ -n "${ARCLUME_CODE_SIGN_IDENTITY:-}" ]]; then
+  SIGNING_ARGS+=("CODE_SIGN_IDENTITY=$ARCLUME_CODE_SIGN_IDENTITY" "CODE_SIGN_STYLE=Manual")
+  if [[ "$ARCLUME_CODE_SIGN_IDENTITY" == "-" ]]; then
+    SIGNING_ARGS+=("DEVELOPMENT_TEAM=")
+    echo "警告：临时签名可能使每次重新构建后需要重新授权麦克风。" >&2
+  fi
+fi
+
 xcodebuild \
   -project "$PROJECT_PATH" \
   -scheme "$SCHEME" \
   -configuration "$CONFIGURATION" \
   -destination "platform=macOS" \
   -derivedDataPath "$DERIVED_DATA_PATH" \
-  CODE_SIGN_IDENTITY=- \
-  CODE_SIGN_STYLE=Manual \
-  DEVELOPMENT_TEAM= \
-  SWIFT_EMIT_LOC_STRINGS=NO \
+  "${SIGNING_ARGS[@]}" \
   build
 
 if [[ ! -d "$APP_BUNDLE" || ! -x "$APP_BINARY" ]]; then

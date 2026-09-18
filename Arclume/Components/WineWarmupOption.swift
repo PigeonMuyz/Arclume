@@ -4,15 +4,16 @@ struct WineWarmupOption: View {
     var showsStatus = true
     @AppStorage(WineWarmupService.defaultsKey, store: UserDefaults(suiteName: suiteName)) private var enabled = false
     @AppStorage(WineWarmupService.targetsKey, store: UserDefaults(suiteName: suiteName)) private var selectedTargets = "[]"
+    @State private var availableTargets: [WineWarmupTarget] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Toggle("随 Arclume 启动并预热 Wine", isOn: $enabled)
+            Toggle("运行环境随 Arclume 启动", isOn: $enabled)
                 .accessibilityIdentifier("wine-prewarm-toggle")
-            if enabled {
-                ForEach(BundledWineRuntime.prefixURL == BundledWineRuntime.standardSteamPrefixURL ? [.steam] : WineWarmupTarget.allCases) { target in
+            if enabled && availableTargets.count > 1 {
+                ForEach(availableTargets) { target in
                     HStack {
-                        Toggle(BundledWineRuntime.prefixURL == BundledWineRuntime.standardSteamPrefixURL ? "ALBottles · 所有 Windows 应用" : target.title, isOn: Binding(
+                        Toggle(target.prefix.lastPathComponent, isOn: Binding(
                             get: { WineWarmupTarget.decode(selectedTargets).contains(target) },
                             set: { selected in
                                 var targets = WineWarmupTarget.decode(selectedTargets)
@@ -28,12 +29,18 @@ struct WineWarmupOption: View {
                     }
                     .padding(.leading, 20)
                 }
+            } else if enabled && showsStatus, let target = availableTargets.first {
+                WineWarmupStatus(session: WineWarmupService.shared.session(for: target))
             }
+        }
+        .onAppear { availableTargets = WineWarmupTarget.available }
+        .onReceive(NotificationCenter.default.publisher(for: .arclumeWinePrefixReady)) { _ in
+            availableTargets = WineWarmupTarget.available
         }
         .onChange(of: enabled) { _, _ in
             guard !ArclumeTestEnvironment.isTesting else { return }
-            // New opt-ins start with an explicit empty selection; only existing
-            // enabled preferences are migrated by ContentView at startup.
+            // Keep explicit choices for multiple containers; a sole container
+            // is selected by the service without rewriting saved preferences.
             if UserDefaults(suiteName: suiteName)?.object(forKey: WineWarmupService.targetsKey) == nil {
                 selectedTargets = "[]"
             }
