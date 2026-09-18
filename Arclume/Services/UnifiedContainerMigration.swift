@@ -6,6 +6,18 @@ import Darwin
 nonisolated struct UnifiedContainerMigration: Sendable {
     static let legacyRoots = ["WindowsGameWinePrefixes", "OnlineGameWinePrefixes", "CXPBottles"]
     static let registryNames = ["system.reg", "user.reg", "userdef.reg"]
+    /// Wine also installs these built-ins outside drive_c/windows. Match exact files,
+    /// not entire Program Files trees, so application data never inherits this policy.
+    private static let baseSystemFiles: Set<String> = Set(["cxbottle.conf"] +
+        ["drive_c/program files/", "drive_c/program files (x86)/"].flatMap { folder in
+            ["common files/system/ado/msado15.dll",
+             "common files/system/ole db/msdaps.dll",
+             "common files/system/ole db/msdasql.dll",
+             "common files/system/ole db/oledb32.dll",
+             "internet explorer/iexplore.exe",
+             "windows media player/wmplayer.exe",
+             "windows nt/accessories/wordpad.exe"].map { folder + $0 }
+        })
     let root: URL
     private let physicalRoot: String
     init(root: URL) {
@@ -161,7 +173,8 @@ nonisolated struct UnifiedContainerMigration: Sendable {
             let type = attributes[.type] as? FileAttributeType
             switch type {
             case .typeSymbolicLink:
-                iterator.skipDescendants()
+                // FileManager enumeration does not follow symbolic links. Calling
+                // skipDescendants on a non-directory can skip the next real folder.
                 return (name, Entry(kind: .link, signature: try fm.destinationOfSymbolicLink(atPath: url.path), bytes: 0))
             case .typeDirectory:
                 return (name, Entry(kind: .directory, signature: "", bytes: 0))
@@ -214,7 +227,8 @@ nonisolated struct UnifiedContainerMigration: Sendable {
                     if Self.registryNames.contains(name) { continue }
                     let lower = name.lowercased()
                     if entry.kind == snapshots[previous][name]?.kind &&
-                        (lower.hasPrefix("drive_c/windows/") || lower.contains("/inetcache/") ||
+                        ((entry.kind == .file && Self.baseSystemFiles.contains(lower)) ||
+                         lower.hasPrefix("drive_c/windows/") || lower.contains("/inetcache/") ||
                          lower.hasSuffix(".ds_store") || name.hasPrefix(".arclume-") || name == ".update-timestamp" ||
                          Self.registryNames.contains(where: { name == $0 + ".orig" || name == $0 + ".procyon-backup" })) {
                         notices.append("保留基础容器系统/缓存文件：\(name)")

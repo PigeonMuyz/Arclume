@@ -196,6 +196,69 @@ struct UnifiedContainerMigrationTests {
             #expect(try String(contentsOf: file, encoding: .utf8) == "after!")
         }
     }
+    @Test func reportedBuiltInConflictsAutomaticallyMergeAndFinishUpgrade() throws {
+        try fixture { engine, domain in
+            let names = ["cxbottle.conf"] + ["Program Files", "Program Files (x86)"].flatMap { folder in
+                ["Common Files/System/ADO/msado15.dll", "Common Files/System/OLE DB/msdaps.dll",
+                 "Common Files/System/OLE DB/msdasql.dll", "Common Files/System/OLE DB/oledb32.dll",
+                 "Internet Explorer/iexplore.exe", "Windows Media Player/wmplayer.exe",
+                 "Windows NT/Accessories/wordpad.exe"].map { "drive_c/\(folder)/\($0)" }
+            }
+            #expect(names.count == 15)
+            for name in names {
+                try write("base system version", to: engine.root.appendingPathComponent(base + "/" + name))
+                try write("other system version", to: engine.root.appendingPathComponent(second + "/" + name))
+            }
+            let save = "drive_c/users/crossover/Saved Games/Test/save.dat"
+            try write("keep game save", to: engine.root.appendingPathComponent(second + "/" + save))
+            let plan = try engine.preflight(checkIdle: {})
+            #expect(plan.conflicts.isEmpty) // The upgrade gate must offer migration, not a report-only dead end.
+            #expect(plan.notices.count == 15)
+            _ = try engine.migrate(plan, preferencesDomain: domain, checkIdle: {})
+            _ = try engine.finalize(preferencesDomain: domain, checkIdle: {})
+            #expect(try !engine.requiresMigration())
+            for name in names {
+                #expect(try String(contentsOf: engine.destination.appendingPathComponent(name), encoding: .utf8) == "base system version")
+            }
+            #expect(try String(contentsOf: engine.destination.appendingPathComponent(save), encoding: .utf8) == "keep game save")
+        }
+    }
+    @Test func builtInRulesDoNotDiscardNearbyUserFilesOrSymlinkConflicts() throws {
+        try fixture { engine, _ in
+            let names = ["drive_c/Program Files/Internet Explorer/profile.dat",
+                         "drive_c/Program Files/Common Files/System/ADO/custom.dll",
+                         "drive_c/Games/Internet Explorer/iexplore.exe", "cxbottle.conf.backup"]
+            for name in names {
+                try write("base data", to: engine.root.appendingPathComponent(base + "/" + name))
+                try write("other data", to: engine.root.appendingPathComponent(second + "/" + name))
+            }
+            for (source, target) in [(base, "first"), (second, "second")] {
+                try FileManager.default.createSymbolicLink(atPath: engine.root.appendingPathComponent(source + "/cxbottle.conf").path,
+                                                          withDestinationPath: target)
+            }
+            let plan = try engine.preflight(checkIdle: {})
+            for name in names + ["cxbottle.conf"] {
+                #expect(plan.conflicts.contains("文件或盘符冲突：" + name))
+            }
+        }
+    }
+    @Test func rootSymlinkNeverHidesGameDirectoryFromMigration() throws {
+        try fixture { engine, domain in
+            let external = engine.root.appendingPathComponent("external")
+            try write("external data", to: external.appendingPathComponent("outside.dat"))
+            try FileManager.default.createSymbolicLink(at: engine.root.appendingPathComponent(base + "/00-external"),
+                                                      withDestinationURL: external)
+            let game = "drive_c/Game/save.dat"
+            try write("game data", to: engine.root.appendingPathComponent(base + "/" + game))
+            let plan = try engine.preflight(checkIdle: {})
+            #expect(plan.files[game] != nil)
+            #expect(plan.files["00-external/outside.dat"] == nil)
+            _ = try engine.migrate(plan, preferencesDomain: domain, checkIdle: {})
+            _ = try engine.finalize(preferencesDomain: domain, checkIdle: {})
+            #expect(try String(contentsOf: engine.destination.appendingPathComponent(game), encoding: .utf8) == "game data")
+            #expect(try String(contentsOf: external.appendingPathComponent("outside.dat"), encoding: .utf8) == "external data")
+        }
+    }
     @Test func blocksApplicationFileRegistryAndCaseConflicts() throws {
         try fixture { engine, _ in
             try write("first", to: engine.root.appendingPathComponent(base + "/drive_c/App/config"))
