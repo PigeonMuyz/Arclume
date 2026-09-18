@@ -45,7 +45,7 @@ Release 提供两种 DMG：
 
 每个 DMG 都附带 SHA-256 文件。应用内更新会下载 Release 的 DMG，校验 SHA-256、Bundle ID 和版本/构建号后覆盖安装并重启；因此未配置 Developer ID 证书的 Actions 产物也可作为更新来源。Developer ID 签名与公证状态以对应 Release 说明为准。
 
-应用替换与 Runtime 更新不覆盖游戏、存档或用户 Prefix。旧版统一容器升级是单独的应用内迁移流程；迁移完成并校验后清理旧容器，不保留重复副本。Runtime 更新检查 Manifest、ABI 与 SHA-256，并以原子替换方式更新运行时本体。
+应用替换与 Runtime 更新不覆盖游戏、存档或用户 Prefix。旧版统一容器升级是单独的应用内迁移流程；从 2.0.1 起只检查文件基本信息，不扫描游戏文件内容或执行哈希校验，复制由系统完成。迁移成功后清理旧容器，不保留重复副本；复制失败会中止切换并保留恢复路径。Runtime 更新仍检查 Manifest、ABI 与 SHA-256，并以原子替换方式更新运行时本体。
 
 ### 项目结构
 
@@ -134,7 +134,7 @@ Each Release contains two DMGs and matching SHA-256 files. Developer ID signing 
 - `with-runtime` includes the verified Wine archive for first-run or offline setup.
 - `no-runtime` is smaller and is intended for users who already have a Runtime; the Runtime can be downloaded in **Settings → Updates**.
 
-Application updates verify the DMG SHA-256, bundle ID, and version/build before staging, replacing, and restarting; they do not require matching Developer ID signatures. Runtime updates validate their Manifest, ABI and SHA-256, then atomically replace only the runtime files. Legacy container migration is a separate in-app upgrade flow; verified old containers are removed after migration rather than retained as duplicate copies.
+Application updates verify the DMG SHA-256, bundle ID, and version/build before staging, replacing, and restarting; they do not require matching Developer ID signatures. Runtime updates validate their Manifest, ABI and SHA-256, then atomically replace only the runtime files. Legacy container migration is a separate in-app upgrade flow. Starting with 2.0.1, it inventories file metadata without reading or hashing game contents, and delegates copying to the OS. Old containers are removed after successful migration rather than retained as duplicate copies; copy errors stop activation and leave recovery available.
 
 ### Known YY limitation
 

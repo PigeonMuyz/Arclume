@@ -1,8 +1,7 @@
 import Foundation
-import CryptoKit
 import Darwin
 
-/// Offline, copy/verify/switch migration. Never run Wine against a staging prefix.
+/// Offline, inventory/copy/switch migration. Never run Wine against a staging prefix.
 /// All paths in the journal are relative to the injected support root.
 nonisolated struct UnifiedContainerMigration: Sendable {
     static let legacyRoots = ["WindowsGameWinePrefixes", "OnlineGameWinePrefixes", "CXPBottles"]
@@ -42,6 +41,7 @@ nonisolated struct UnifiedContainerMigration: Sendable {
     struct Entry: Equatable, Sendable {
         enum Kind: Sendable { case directory, file, link }
         let kind: Kind
+        /// Link target, or file identity/mtime metadata. Never a content hash.
         let signature: String
         let bytes: Int64
     }
@@ -143,20 +143,16 @@ nonisolated struct UnifiedContainerMigration: Sendable {
         return !legacy.isEmpty
     }
 
-    private func hash(_ url: URL) throws -> String {
-        let handle = try FileHandle(forReadingFrom: url)
-        defer { try? handle.close() }
-        var digest = SHA256()
-        while let data = try handle.read(upToCount: 1_048_576), !data.isEmpty { digest.update(data: data) }
-        return digest.finalize().map { String(format: "%02x", $0) }.joined()
-    }
+    /// Read only filesystem metadata; game contents are neither loaded nor hashed.
     private func snapshot(_ prefix: URL) throws -> [String: Entry] {
         try safe(prefix)
         var result: [String: Entry] = [:]
         var enumerationError: Error?
         guard let iterator = fm.enumerator(at: prefix, includingPropertiesForKeys: nil,
             errorHandler: { _, error in enumerationError = error; return false }) else { throw fail("无法读取容器。") }
-        for case let url as URL in iterator {
+        // Bound Foundation's temporary allocations even for very large directory trees.
+        while let item = try autoreleasepool(invoking: { () throws -> (String, Entry)? in
+            guard let url = iterator.nextObject() as? URL else { return nil }
             let path = scopedPath(url)
             let basePath = scopedPath(prefix)
             guard path.hasPrefix(basePath + "/") else { throw fail("容器枚举路径越界。") }
@@ -166,14 +162,18 @@ nonisolated struct UnifiedContainerMigration: Sendable {
             switch type {
             case .typeSymbolicLink:
                 iterator.skipDescendants()
-                result[name] = Entry(kind: .link, signature: try fm.destinationOfSymbolicLink(atPath: url.path), bytes: 0)
+                return (name, Entry(kind: .link, signature: try fm.destinationOfSymbolicLink(atPath: url.path), bytes: 0))
             case .typeDirectory:
-                result[name] = Entry(kind: .directory, signature: "", bytes: 0)
+                return (name, Entry(kind: .directory, signature: "", bytes: 0))
             case .typeRegular:
-                result[name] = Entry(kind: .file, signature: try hash(url), bytes: (attributes[.size] as? NSNumber)?.int64Value ?? 0)
+                let device = (attributes[.systemNumber] as? NSNumber)?.stringValue ?? ""
+                let inode = (attributes[.systemFileNumber] as? NSNumber)?.stringValue ?? ""
+                let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                return (name, Entry(kind: .file, signature: "\(device):\(inode):\(modified)",
+                                    bytes: (attributes[.size] as? NSNumber)?.int64Value ?? 0))
             default: throw fail("容器包含不能安全复制的特殊文件：\(name)")
             }
-        }
+        }) { result[item.0] = item.1 }
         if let enumerationError { throw enumerationError }
         return result
     }
@@ -208,6 +208,8 @@ nonisolated struct UnifiedContainerMigration: Sendable {
                 }
                 spellings[folded] = name
                 if let previous = files[name] {
+                    // Only the same filesystem object (or identical link/directory metadata)
+                    // can be deduplicated without reading contents. Equal sizes are not proof.
                     guard snapshots[previous][name] != entry else { continue }
                     if Self.registryNames.contains(name) { continue }
                     let lower = name.lowercased()
@@ -265,7 +267,7 @@ nonisolated struct UnifiedContainerMigration: Sendable {
                     notices: notices.sorted(), conflicts: Array(Set(conflicts)).sorted(), bytes: bytes)
     }
 
-    /// The caller confirms the exact preflight plan; source hashes are checked again before publishing.
+    /// The caller confirms the plan; only source metadata is rechecked before publishing.
     func migrate(_ plan: Plan, preferencesDomain: String, checkIdle: () throws -> Void,
                  progress: @Sendable (Double, String) -> Void = { _, _ in },
                  checkpoint: (String) throws -> Void = { _ in }) throws -> Journal {
@@ -290,30 +292,27 @@ nonisolated struct UnifiedContainerMigration: Sendable {
             // Directories first. copyItem preserves files, permissions and links without following links.
             let orderedFiles = plan.files.keys.sorted(by: { ($0.split(separator: "/").count, $0) < ($1.split(separator: "/").count, $1) })
             for (index, name) in orderedFiles.enumerated() {
-                let owner = plan.files[name]!, entry = plan.snapshots[owner][name]!
-                let from = root.appendingPathComponent(plan.sources[owner]).appendingPathComponent(name)
-                let to = stage.appendingPathComponent(name)
-                try safe(to)
-                if entry.kind == .directory { try fm.createDirectory(at: to, withIntermediateDirectories: false) }
-                else { try fm.copyItem(at: from, to: to) }
-                if index % 100 == 0 { progress(0.55 * Double(index + 1) / Double(orderedFiles.count), "正在合并应用文件…") }
-            }
-            // Verify every copied byte/link before modifying registry files.
-            progress(0.6, "正在校验迁移副本…")
-            let copied = try snapshot(stage)
-            for (name, owner) in plan.files where copied[name] != plan.snapshots[owner][name] {
-                throw fail("复制校验失败：\(name)。旧容器未修改。")
+                try autoreleasepool {
+                    let owner = plan.files[name]!, entry = plan.snapshots[owner][name]!
+                    let from = root.appendingPathComponent(plan.sources[owner]).appendingPathComponent(name)
+                    let to = stage.appendingPathComponent(name)
+                    try safe(from.deletingLastPathComponent())
+                    try safe(to)
+                    if entry.kind == .directory { try fm.createDirectory(at: to, withIntermediateDirectories: false) }
+                    // Foundation delegates file copying to the OS, without loading a whole file as Data.
+                    else { try fm.copyItem(at: from, to: to) }
+                }
+                if index % 100 == 0 { progress(0.7 * Double(index + 1) / Double(orderedFiles.count), "正在合并应用文件…") }
             }
             for (name, text) in plan.registries {
                 try Data(text.utf8).write(to: stage.appendingPathComponent(name), options: .atomic)
-                guard try String(contentsOf: stage.appendingPathComponent(name), encoding: .utf8) == text else { throw fail("注册表写入校验失败。") }
             }
             progress(0.75, "正在同步系统配置…")
             try Data(record.id.uuidString.utf8).write(to: stage.appendingPathComponent(".arclume-migration-id"), options: .atomic)
             try Data((plan.notices + plan.conflicts).joined(separator: "\n").utf8)
                 .write(to: recovery.appendingPathComponent("merge-report.txt"), options: .atomic)
             for (i, path) in plan.sources.enumerated() {
-                progress(0.8 + 0.1 * Double(i) / Double(plan.sources.count), "正在复核原容器…")
+                progress(0.8 + 0.1 * Double(i) / Double(plan.sources.count), "正在完成迁移…")
                 guard try snapshot(root.appendingPathComponent(path)) == plan.snapshots[i] else {
                     throw fail("源容器在检查后发生变化，已取消切换。请退出 Windows 应用后恢复并重试。")
                 }
@@ -409,7 +408,7 @@ nonisolated struct UnifiedContainerMigration: Sendable {
         try withLock {
             try checkIdle()
             guard var record = try journal(), [.complete, .cleaning, .finalized].contains(record.phase) else {
-                throw fail("迁移尚未校验完成，不能清理。")
+                throw fail("迁移尚未完成，不能清理。")
             }
             try validatePublished(record)
             if record.phase == .finalized { return record }

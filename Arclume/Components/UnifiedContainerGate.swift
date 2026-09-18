@@ -190,7 +190,7 @@ struct UnifiedContainerGate<Content: View>: View {
         .confirmationDialog("将旧容器安全合并为 ALBottles？", isPresented: $confirmMigration, titleVisibility: .visible) {
             Button("开始迁移") { model.start() }
             Button("取消", role: .cancel) { }
-        } message: { Text("校验成功后切换到新环境，并自动移除旧副本。升级期间请勿启动 Windows 应用。") }
+        } message: { Text("迁移完成后切换到新环境，并自动移除旧副本。升级期间请勿启动 Windows 应用。") }
         .confirmationDialog("恢复迁移前的容器和设置？", isPresented: $confirmRestore, titleVisibility: .visible) {
             Button("恢复旧容器") { model.restore() }
             Button("取消", role: .cancel) { }

@@ -154,6 +154,48 @@ struct UnifiedContainerMigrationTests {
             try engine.rollback(preferencesDomain: domain, checkIdle: {})
         }
     }
+    @Test func preflightNeverReadsGameFileContentsAndCopyFailureKeepsSources() throws {
+        try fixture { engine, domain in
+            let file = engine.root.appendingPathComponent(base + "/drive_c/game.pak")
+            try write("unreadable game data", to: file)
+            try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: file.path)
+            defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path) }
+            #expect(throws: (any Error).self) { try FileHandle(forReadingFrom: file).close() }
+            let plan = try engine.preflight(checkIdle: {})
+            #expect(plan.conflicts.isEmpty)
+            #expect(plan.snapshots[0]["drive_c/game.pak"]?.bytes == 20)
+            #expect(throws: (any Error).self) { try engine.migrate(plan, preferencesDomain: domain, checkIdle: {}) }
+            #expect(!FileManager.default.fileExists(atPath: engine.destination.path))
+            try engine.rollback(preferencesDomain: domain, checkIdle: {})
+            #expect(FileManager.default.fileExists(atPath: file.path))
+        }
+    }
+    @Test func equalSizeFilesAreNotSilentlyDeduplicatedWithoutContentChecks() throws {
+        try fixture { engine, _ in
+            let first = engine.root.appendingPathComponent(base + "/drive_c/App/save")
+            let second = engine.root.appendingPathComponent(second + "/drive_c/App/save")
+            try write("aaaa", to: first)
+            try write("bbbb", to: second)
+            let date = Date(timeIntervalSince1970: 1_700_000_000)
+            for file in [first, second] {
+                try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: file.path)
+            }
+            #expect(try engine.preflight(checkIdle: {}).conflicts.contains { $0.contains("App/save") })
+        }
+    }
+    @Test func sameSizeSourceModificationStillPreventsSwitching() throws {
+        try fixture { engine, domain in
+            let file = engine.root.appendingPathComponent(base + "/drive_c/game.pak")
+            try write("before", to: file)
+            let plan = try engine.preflight(checkIdle: {})
+            try write("after!", to: file)
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: file.path)
+            #expect(throws: (any Error).self) { try engine.migrate(plan, preferencesDomain: domain, checkIdle: {}) }
+            #expect(!FileManager.default.fileExists(atPath: engine.destination.path))
+            try engine.rollback(preferencesDomain: domain, checkIdle: {})
+            #expect(try String(contentsOf: file, encoding: .utf8) == "after!")
+        }
+    }
     @Test func blocksApplicationFileRegistryAndCaseConflicts() throws {
         try fixture { engine, _ in
             try write("first", to: engine.root.appendingPathComponent(base + "/drive_c/App/config"))
