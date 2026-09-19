@@ -78,7 +78,8 @@ struct ArclumeApp: App {
             VStack(spacing: 16) {
                 Text("重置尚未完成").font(.title2)
                 Text(resetError)
-                Text("请退出其他 Wine / CrossOver 程序，检查目录权限后重新打开 Arclume。为保护数据，本次未加载游戏库；已移入废纸篓的数据可恢复。")
+                Text("本次未加载游戏库。请按上方错误处理后重新打开 Arclume，程序会继续完成重置；已移入废纸篓的数据仍可恢复。")
+                    .fixedSize(horizontal: false, vertical: true)
                 Button("退出") { NSApp.terminate(nil) }
             }.padding(32).frame(width: 580)
         } else {

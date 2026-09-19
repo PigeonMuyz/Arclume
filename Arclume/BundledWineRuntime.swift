@@ -5,6 +5,7 @@
 
 import CryptoKit
 import Foundation
+import OSLog
 
 /// The online-game setup flow stores its runtime choice separately from the
 /// general CrossOver preference, so choosing bundled Wine never replaces a
@@ -355,6 +356,7 @@ enum BundledWineRuntimeError: LocalizedError {
 /// resolves built-in modules from that layout rather than from a standalone
 /// archive path. The Games prefix and game files are never modified here.
 enum BundledWineRuntime {
+    nonisolated private static let upgradeLogger = Logger(subsystem: "io.github.pigeonmuyz.arclume", category: "RuntimeUpgrade")
     typealias ProgressHandler = @Sendable (_ fraction: Double, _ label: String) -> Void
 
     struct LaunchConfiguration {
@@ -544,11 +546,13 @@ enum BundledWineRuntime {
         defer { installationLock.unlock() }
         let manifest = try requiredRuntimeManifest()
         let expectedVersion = manifest.version
+        upgradeLogger.notice("Runtime check: expected=\(expectedVersion, privacy: .public) installed=\(installedRuntimeVersion(at: installationURL) ?? "missing", privacy: .public)")
         try migrateLegacyInstallationIfNeeded(manifest: manifest)
 
         if FileManager.default.fileExists(atPath: installationURL.path) {
             guard isValidRuntime() else { throw BundledWineRuntimeError.invalidRuntime }
             if isCurrentRuntime(expectedVersion: expectedVersion) {
+                upgradeLogger.notice("Runtime check: reusing installed runtime")
                 progress?(1, "内置 Wine \(expectedVersion) 已就绪")
                 return installationURL
             }
@@ -600,6 +604,7 @@ enum BundledWineRuntime {
             with: extractedRuntimeURL,
             fileManager: fileManager
         )
+        upgradeLogger.notice("Runtime bundled archive installed: version=\(expectedVersion, privacy: .public)")
         progress?(1, "内置 Wine \(expectedVersion) 已准备完成")
         return installationURL
     }
@@ -630,6 +635,7 @@ enum BundledWineRuntime {
         progress: ProgressHandler? = nil
     ) throws -> URL {
         try downloadedManifest.validate()
+        upgradeLogger.notice("Runtime downloaded update: installed=\(installedRuntimeVersion(at: installationURL) ?? "missing", privacy: .public) target=\(downloadedManifest.version, privacy: .public)")
         guard supportsDownloadedRuntimeManifest(downloadedManifest) else {
             throw ArclumeRuntimeManifestError.invalid("与当前 Games 容器 ABI 不兼容")
         }
@@ -680,6 +686,7 @@ enum BundledWineRuntime {
             fileManager: fileManager
         )
         progress?(1, "Arclume Wine \(downloadedManifest.version) 已准备完成")
+        upgradeLogger.notice("Runtime downloaded update completed: version=\(downloadedManifest.version, privacy: .public)")
         return installationURL
     }
 
@@ -1123,6 +1130,7 @@ enum BundledWineRuntime {
         guard !fileManager.fileExists(atPath: currentURL.path),
               let legacyURL = recognizedLegacyInstallation(manifest: manifest)
         else { return }
+        upgradeLogger.notice("Legacy runtime adoption: root=\(legacyURL.lastPathComponent, privacy: .public) targetMarker=\(manifest.version, privacy: .public); existing binaries will be reused")
 
         try fileManager.createDirectory(
             at: currentURL.deletingLastPathComponent(),
@@ -1245,6 +1253,9 @@ enum BundledWineRuntime {
         to handle: FileHandle
     ) {
         try? writePrefixInitializationLog("Arclume 内置 Wine 启动器调试", to: handle)
+        let appVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        let appBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        try? writePrefixInitializationLog("App：\(appVersion) (\(appBuild)) / \(buildFlavor)；运行时清单：\(runtimeVersion)；已安装标记：\(installedRuntimeVersion(at: runtimeURL) ?? "missing")", to: handle)
         try? writePrefixInitializationLog(
             "启动命令：\(wineURL.path) \(executableURL.path) \(arguments.joined(separator: " "))",
             to: handle
@@ -1291,7 +1302,13 @@ enum BundledWineRuntime {
         appendDiagnosticCommand(
             executableURL: URL(fileURLWithPath: "/usr/sbin/sysctl"),
             arguments: ["-n", "sysctl.proc_translated"],
-            label: "Rosetta 状态",
+            label: "当前诊断进程是否经 Rosetta 转译（不是 Rosetta 安装状态）",
+            to: handle
+        )
+        appendDiagnosticCommand(
+            executableURL: URL(fileURLWithPath: "/usr/bin/arch"),
+            arguments: ["-x86_64", "/usr/bin/uname", "-m"],
+            label: "x86_64 执行能力检查（不启动 Wine）",
             to: handle
         )
 

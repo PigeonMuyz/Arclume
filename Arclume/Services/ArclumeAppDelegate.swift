@@ -1,9 +1,11 @@
 import AppKit
 
-/// AppKit's terminateLater is required: willTerminate cannot await Wine cleanup.
+/// Keep the normal run loop alive while Swift concurrency drains owned Wine.
+/// terminateLater enters AppKit's modal loop, which can starve MainActor tasks.
 @MainActor
 final class ArclumeAppDelegate: NSObject, NSApplicationDelegate {
     private var terminationPending = false
+    private(set) var terminationReady = false
     private let beginExit: () -> Void
     private let stopWine: () async throws -> Void
     private let cancelExit: () -> Void
@@ -49,24 +51,31 @@ final class ArclumeAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !ArclumeTestEnvironment.isTesting else { return .terminateNow }
+        if terminationReady { return .terminateNow }
         if UnifiedContainerMigrationModel.shared.busy {
+            ArclumeResetService.requested = false
             let alert = NSAlert()
             alert.messageText = "容器迁移正在进行"
             alert.informativeText = "请等待校验或恢复完成后再退出，避免中断容器切换。"
             alert.runModal()
             return .terminateCancel
         }
-        return requestTermination { sender.reply(toApplicationShouldTerminate: $0) }
+        return requestTermination { completed in
+            if completed { sender.terminate(nil) }
+        }
     }
 
     func requestTermination(reply: @escaping (Bool) -> Void) -> NSApplication.TerminateReply {
-        guard !terminationPending else { return .terminateLater }
+        // Cancel this attempt, then ask AppKit to terminate again after cleanup.
+        // Do not use reply(toApplicationShouldTerminate:) without terminateLater.
+        guard !terminationPending else { return .terminateCancel }
         terminationPending = true
         beginExit()
         Task {
             do {
                 try await stopWine()
                 try finishExit()
+                terminationReady = true
                 reply(true)
             } catch {
                 cancelExit()
@@ -75,6 +84,6 @@ final class ArclumeAppDelegate: NSObject, NSApplicationDelegate {
                 reportFailure(error)
             }
         }
-        return .terminateLater
+        return .terminateCancel
     }
 }

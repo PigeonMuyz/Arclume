@@ -5,6 +5,22 @@ import Testing
 
 @MainActor
 struct ArclumeResetTests {
+    @Test func currentApplicationUsesStandardDefaultsWithoutClearingThem() throws {
+        let appDomain = try #require(Bundle.main.bundleIdentifier)
+        // The old implementation returned nil here in the actual app. Merely
+        // resolve the object: never reset or write the test host's own domain.
+        #expect(ArclumeResetService.applicationDefaults(for: appDomain) === UserDefaults.standard)
+    }
+
+    @Test func isolatedApplicationDomainNeverUsesStandardDefaults() throws {
+        try fixture { _, _, appName, _, app in
+            let resolved = try #require(ArclumeResetService.applicationDefaults(for: appName))
+            #expect(resolved !== UserDefaults.standard)
+            #expect(resolved.bool(forKey: ArclumeResetService.pendingKey))
+            #expect(resolved.string(forKey: "windowState") == app.string(forKey: "windowState"))
+        }
+    }
+
     private func fixture(_ body: (URL, String, String, UserDefaults, UserDefaults) throws -> Void) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("ResetTests-\(UUID())", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -92,7 +108,11 @@ struct ArclumeResetTests {
         let delegate = ArclumeAppDelegate(beginExit: { events.append("gate") }, stopWine: { events.append("stop") },
             cancelExit: { events.append("cancel") }, reportFailure: { _ in events.append("error") },
             finishExit: { events.append("commit") })
-        _ = delegate.requestTermination { reply = $0 }
+        let response = delegate.requestTermination {
+            #expect(delegate.terminationReady)
+            reply = $0
+        }
+        #expect(response == .terminateCancel)
         for _ in 0..<100 where reply == nil { await Task.yield() }
         #expect(reply == true)
         #expect(events == ["gate", "stop", "commit"])
@@ -132,6 +152,7 @@ struct ArclumeResetTests {
             _ = delegate.requestTermination { reply = $0 }
             for _ in 0..<100 where reply == nil { await Task.yield() }
             #expect(reply == false)
+            #expect(!delegate.terminationReady)
             #expect(cancelled)
             #expect(committed == !failAtDrain)
         }

@@ -45,6 +45,12 @@ enum ArclumeResetService {
         }
     }
 
+    /// Foundation rejects init(suiteName:) for the running app's own identifier.
+    /// Separate test domains must still use their own stores, never standard.
+    static func applicationDefaults(for domain: String) -> UserDefaults? {
+        domain == Bundle.main.bundleIdentifier ? .standard : UserDefaults(suiteName: domain)
+    }
+
     /// Parameters allow tests to use only private domains and temporary folders.
     /// Move the whole directory, never traverse symlinks or enumerate game files.
     static func reset(supportRoot: URL, expectedParent: URL,
@@ -57,6 +63,13 @@ enum ArclumeResetService {
               preferencesDomain != appDomain,
               preferencesDomain != "NSGlobalDomain", appDomain != "NSGlobalDomain"
         else { throw CocoaError(.fileWriteNoPermission) }
+        // Resolve both stores before moving data, so an unavailable store cannot
+        // leave the reset half-finished after the support folder reaches Trash.
+        guard let preferences = UserDefaults(suiteName: preferencesDomain),
+              let application = applicationDefaults(for: appDomain) else {
+            throw NSError(domain: "ArclumeReset", code: 2,
+                          userInfo: [NSLocalizedDescriptionKey: "无法打开 Arclume 设置，尚未移动应用数据。"])
+        }
         let values: URLResourceValues?
         do {
             values = try root.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
@@ -70,8 +83,6 @@ enum ArclumeResetService {
             }
             try moveToTrash(root)
         }
-        guard let preferences = UserDefaults(suiteName: preferencesDomain),
-              let application = UserDefaults(suiteName: appDomain) else { throw CocoaError(.fileWriteUnknown) }
         preferences.removePersistentDomain(forName: preferencesDomain)
         // These are migration barriers, not restored user settings.
         preferences.set(true, forKey: legacyDefaultsKey)

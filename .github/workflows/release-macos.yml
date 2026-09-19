@@ -271,6 +271,7 @@ jobs:
       - name: 发布 GitHub Release
         env:
           TAG: ${{ steps.release.outputs.tag }}
+          BUILD: ${{ steps.release.outputs.build }}
           RELEASE_NAME: ${{ steps.release.outputs.release_name }}
           RUNTIME_VERSION: ${{ steps.release.outputs.runtime_version }}
           FULL_DMG_PATH: ${{ steps.package.outputs.full_dmg_path }}
@@ -307,7 +308,12 @@ jobs:
                 printf '%s' '本次未配置发布签名凭据，DMG 未签名、未公证；应用内更新会在 SHA-256、Bundle ID 和版本/构建号校验后安装。'
               fi)")
 
-          release_summary="CHANGELOG/released/${TAG#v}.md"
+          # A reissued version gets an immutable build-specific summary;
+          # historical release notes are never overwritten.
+          release_summary="CHANGELOG/released/${TAG#v}-${BUILD}.md"
+          if [ ! -f "$release_summary" ]; then
+            release_summary="CHANGELOG/released/${TAG#v}.md"
+          fi
           if [ -f "$release_summary" ]; then
             notes="$(cat "$release_summary")"$'\n\n'"$notes"
           fi

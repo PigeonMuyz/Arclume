@@ -1,9 +1,11 @@
 import SwiftUI
 import AppKit
 import Combine
+import OSLog
 
 @MainActor
 final class UnifiedContainerMigrationModel: ObservableObject {
+    private static let logger = Logger(subsystem: "io.github.pigeonmuyz.arclume", category: "ContainerUpgrade")
     static let shared = UnifiedContainerMigrationModel()
     @Published var ready = false
     @Published var inspected = false
@@ -27,7 +29,9 @@ final class UnifiedContainerMigrationModel: ObservableObject {
         do {
             record = try migration.journal()
             ready = try !migration.requiresMigration()
+            Self.logger.notice("Migration inspect: ready=\(self.ready) phase=\(self.record?.phase.rawValue ?? "none", privacy: .public)")
         } catch {
+            Self.logger.error("Migration inspect failed: \(String(reflecting: error), privacy: .private)")
             diagnostic = error.localizedDescription
             message = "暂时无法检查旧环境。请退出其他 Windows 程序后重试；原数据不会改变。"
         }
@@ -37,6 +41,7 @@ final class UnifiedContainerMigrationModel: ObservableObject {
     }
     func finishUpgrade() {
         guard !demonstrationOnly, !busy else { return }
+        Self.logger.notice("Migration finalization retry started")
         busy = true; transferring = true; message = nil
         progress = 1; progressLabel = "正在完成升级…"
         let engine = migration
@@ -46,7 +51,9 @@ final class UnifiedContainerMigrationModel: ObservableObject {
                     try engine.finalize(preferencesDomain: suiteName, checkIdle: Self.checkIdle)
                 }.value
                 completed = true
+                Self.logger.notice("Migration finalization completed")
             } catch {
+                Self.logger.error("Migration finalization failed: \(String(reflecting: error), privacy: .private)")
                 record = try? engine.journal()
                 diagnostic = error.localizedDescription
                 message = "升级收尾未完成。请退出 Windows 程序后重试。"
@@ -63,13 +70,16 @@ final class UnifiedContainerMigrationModel: ObservableObject {
     }
     func check() {
         guard !demonstrationOnly, !busy else { return }
+        Self.logger.notice("Migration preflight started")
         busy = true; message = "正在检查文件、注册表和盘符；旧容器不会改变。"; plan = nil
         let engine = migration
         Task {
             do {
                 plan = try await Task.detached { try engine.preflight(checkIdle: Self.checkIdle) }.value
+                Self.logger.notice("Migration preflight completed: sources=\(self.plan?.sources.count ?? 0) conflicts=\(self.plan?.conflicts.count ?? 0) notices=\(self.plan?.notices.count ?? 0)")
                 message = nil
             } catch {
+                Self.logger.error("Migration preflight failed: \(String(reflecting: error), privacy: .private)")
                 diagnostic = error.localizedDescription
                 message = "检查未完成，请先退出其他 Arclume 和 Windows 程序，再重试。原数据未改变。"
             }
@@ -78,6 +88,7 @@ final class UnifiedContainerMigrationModel: ObservableObject {
     }
     func start() {
         guard !demonstrationOnly, !busy, let plan, plan.conflicts.isEmpty else { return }
+        Self.logger.notice("Migration merge started: sources=\(plan.sources.count)")
         busy = true; transferring = true; progress = 0; progressLabel = "准备迁移"; message = nil
         let engine = migration
         let report: @Sendable (Double, String) -> Void = { value, label in
@@ -91,7 +102,9 @@ final class UnifiedContainerMigrationModel: ObservableObject {
                     return try engine.finalize(preferencesDomain: suiteName, checkIdle: Self.checkIdle)
                 }.value
                 completed = true; message = nil
+                Self.logger.notice("Migration merge and finalization completed")
             } catch {
+                Self.logger.error("Migration merge failed: \(String(reflecting: error), privacy: .private)")
                 record = try? engine.journal()
                 diagnostic = error.localizedDescription
                 self.plan = nil

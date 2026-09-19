@@ -46,8 +46,9 @@ struct WineTerminationTests {
         }, cancelExit: { Issue.record("Unexpected cancellation") }, reportFailure: { _ in
             Issue.record("Unexpected error")
         })
-        #expect(delegate.requestTermination { replies.append($0) } == .terminateLater)
-        #expect(delegate.requestTermination { replies.append($0) } == .terminateLater)
+        #expect(delegate.requestTermination { replies.append($0) } == .terminateCancel)
+        #expect(delegate.requestTermination { replies.append($0) } == .terminateCancel)
+        #expect(!delegate.terminationReady)
         #expect(beginCount == 1)
         for _ in 0..<100 where finish == nil { try await Task.sleep(for: .milliseconds(10)) }
         let continuation = try #require(finish)
@@ -56,6 +57,7 @@ struct WineTerminationTests {
         continuation.resume()
         for _ in 0..<100 where replies.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         #expect(replies == [true])
+        #expect(delegate.terminationReady)
     }
 
     @Test func failedCleanupCancelsQuitAndAllowsRetry() async throws {
@@ -70,11 +72,13 @@ struct WineTerminationTests {
         _ = delegate.requestTermination { replies.append($0) }
         for _ in 0..<100 where replies.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
         #expect(replies == [false])
+        #expect(!delegate.terminationReady)
         #expect(cancelled == 1)
         #expect(errors == 1)
         _ = delegate.requestTermination { replies.append($0) }
         for _ in 0..<100 where replies.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
         #expect(replies == [false, true])
+        #expect(delegate.terminationReady)
         #expect(attempts == 2)
     }
 

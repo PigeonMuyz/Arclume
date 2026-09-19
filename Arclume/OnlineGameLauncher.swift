@@ -656,6 +656,7 @@ enum OnlineGameLauncher {
             try OnlineGameBottleConfiguration.apply(to: bottleURL)
         } catch {
             writeLaunchLog("内置 Wine 运行时准备失败：\(error.localizedDescription)", to: logHandle)
+            writeLaunchFailure(error, stage: "runtime-preparation", to: logHandle)
             logHandle.closeFile()
             throw error
         }
@@ -693,7 +694,11 @@ enum OnlineGameLauncher {
         process.standardOutput = logHandle
         process.standardError = logHandle
         do { try ArclumeWineStopService.withLaunchTicket(launchTicket) { try process.run() } }
-        catch { logHandle.closeFile(); throw error }
+        catch {
+            writeLaunchFailure(error, stage: "wine-process-run", to: logHandle)
+            logHandle.closeFile()
+            throw error
+        }
 
         let processIdentifier = process.processIdentifier
         writeLaunchLog("内置 Wine 已启动（PID \(processIdentifier)）", to: logHandle)
@@ -744,6 +749,16 @@ enum OnlineGameLauncher {
             crossOverAppPath: nil,
             closeLauncherWhenGameStarts: closeLauncherWhenGameStarts
         )
+    }
+
+    private static func writeLaunchFailure(_ error: Error, stage: String, to handle: FileHandle) {
+        var current = error as NSError
+        for depth in 0..<4 {
+            writeLaunchLog("启动失败 [\(stage)] error[\(depth)] domain=\(current.domain) code=\(current.code)：\(current.localizedDescription)", to: handle)
+            guard let underlying = current.userInfo[NSUnderlyingErrorKey] as? NSError else { break }
+            current = underlying
+        }
+        handle.synchronizeFile()
     }
 
     /// Terminates only the two JX3 Windows executables in the selected Games
