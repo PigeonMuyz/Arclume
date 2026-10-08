@@ -4,8 +4,9 @@ build/
 Config.local.xcconfig
 .DS_Store
 *.profraw
+__pycache__/
+*.py[cod]
 xcuserdata/
-Procyon.xcodeproj/-Xcc/
 logs/
 perf_config.ini
 RuntimeSource/cache/

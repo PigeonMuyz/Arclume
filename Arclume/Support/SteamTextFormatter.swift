@@ -1,6 +1,6 @@
 //
 //  SteamTextFormatter.swift
-//  Procyon
+//  Arclume
 //
 
 import Foundation

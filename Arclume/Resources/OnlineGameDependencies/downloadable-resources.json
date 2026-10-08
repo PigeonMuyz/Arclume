@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "components": [
+    {
+      "type": "runtime",
+      "name": "arclume-wine",
+      "id": "io.arclume.runtime.wine",
+      "version": "1.1.2",
+      "fileName": "arclume-wine-1.1.2-x86_64.tar.xz",
+      "sha256": "c0e318d46689c1f709dda2eb518d834945d6dc7cd72c87a0bed0c86ab77d0a15",
+      "byteCount": 148248068,
+      "unpack": false
+    },
+    {
+      "type": "graphics",
+      "name": "d3dmetal",
+      "id": "d3dmetal3",
+      "version": "3",
+      "fileName": "d3dMetal3.tar.xz",
+      "sha256": "6f6232344cb5002c25a0df9b716145aaf4949ca007c02fc33c6c45956afbee38",
+      "byteCount": 15628176,
+      "unpack": false
+    },
+    {
+      "type": "graphics",
+      "name": "d3dmetal",
+      "id": "d3dmetal4",
+      "version": "4-beta2",
+      "fileName": "d3dMetal4.tar.xz",
+      "sha256": "9d9293818a292a89dd9e8ab958bdb3ede6c452c7eae3ea81d77506aecd844637",
+      "byteCount": 16443608,
+      "unpack": false
+    },
+    {
+      "type": "graphics",
+      "name": "dxmt",
+      "id": "dxmt",
+      "version": "0.80",
+      "fileName": "dxmt.tar.gz",
+      "sha256": "8f260e36b5739e68f3bad613381441385c4dc7b85b78ba8de653d5a6a264529d",
+      "byteCount": 18681669,
+      "unpack": false
+    },
+    {
+      "type": "media",
+      "name": "gstreamer",
+      "id": "gstreamer",
+      "version": "1.28.1",
+      "fileName": "gstreamer-framework.tar.xz",
+      "sha256": "26dbeba8283e5a9f0c9429d059cb96642b6aaf245e5a694da9a3799e2b7ada0a",
+      "byteCount": 165980548,
+      "unpack": false
+    },
+    {
+      "type": "fonts",
+      "name": "windows-fonts",
+      "id": "fonts",
+      "version": "2026.09",
+      "fileName": "fonts.tar.xz",
+      "sha256": "129a8c9c8a41367f7d78d65a34fb2bd63c86cd8980f3c2840e7be8d841575b37",
+      "byteCount": 10848240,
+      "unpack": false
+    },
+    {
+      "type": "graphics",
+      "name": "nvngx",
+      "id": "nvngx-jx3",
+      "version": "2026.09",
+      "fileName": "nvngx-jx3.tar.xz",
+      "sha256": "245dbb0d0e4bbed3a7abc6de48eaee02f37245740979587ded2ff0dea5733e3b",
+      "byteCount": 25684564,
+      "unpack": false
+    },
+    {
+      "type": "compatibility",
+      "name": "arclume-libs",
+      "id": "compatibility-libs",
+      "version": "2026.09.24",
+      "fileName": "compatibility-libs.tar.gz",
+      "sha256": "d8dfbf08e64e5a7975167841d872fd5796d0dc33532c8c158dabfc07af587bf4",
+      "byteCount": 69720936,
+      "unpack": true
+    }
+  ],
+  "runtimes": [
+    {
+      "schemaVersion": 1,
+      "id": "io.arclume.runtime.wine",
+      "displayName": "Arclume Wine",
+      "version": "1.1.2",
+      "channel": "stable",
+      "patchSet": "finewine-endfield-e5d4ccad+arclume-input-1+dock-margin-1+loader-lock-1",
+      "runtimeABI": 1,
+      "prefixABI": "arclume-jx3-prefix-1",
+      "architecture": "x86_64",
+      "minimumMacOS": "26.0",
+      "legacyInstallRoots": [
+        "procyon-wine-runtime-x86_64-v8-mono-d3dmetal4-zhcn"
+      ],
+      "legacyInstallMarkers": [
+        "wine-11.0-procyon.7"
+      ],
+      "archive": {
+        "name": "arclume-wine-1.1.2-x86_64.tar.xz",
+        "sha256": "c0e318d46689c1f709dda2eb518d834945d6dc7cd72c87a0bed0c86ab77d0a15",
+        "rootDirectory": "arclume-wine-runtime-x86_64"
+      },
+      "engine": {
+        "wineVersion": "11.0",
+        "crossOverSourceVersion": "26.3.0"
+      }
+    }
+  ],
+  "requirements": [
+    {
+      "runtimeID": "io.arclume.runtime.wine",
+      "runtimeVersion": "1.1.2",
+      "componentIDs": [],
+      "features": {
+        "steam": ["fonts"],
+        "jx3": ["fonts"]
+      },
+      "graphicsComponentIDs": ["d3dmetal3", "d3dmetal4"],
+      "optionalComponentIDs": ["nvngx-jx3"]
+    }
+  ],
+  "runtimeOptions": [
+    {
+      "id": "io.arclume.runtime.wine",
+      "provider": "Arclume",
+      "strategies": [
+        {
+          "delivery": "precompiled",
+          "componentID": "io.arclume.runtime.wine"
+        }
+      ]
+    }
+  ]
+}

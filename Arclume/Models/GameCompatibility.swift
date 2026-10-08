@@ -1,6 +1,6 @@
 //
 //  GameCompatibility.swift
-//  Procyon
+//  Arclume
 //
 
 import Foundation

@@ -9,12 +9,13 @@ App 版本只从 Xcode 项目读取：
 - GitHub Release tag：`v<MARKETING_VERSION>`，例如 `v1.0.4`；更新器仍兼容历史 `v1.0.3-8` 格式。
 
 Runtime 版本从 `arclume-wine-runtime.json` 的 `version` 字段读取。不要手动在 Release Notes 中写死 Runtime 版本。
+运行资源下载基础地址必须通过 GitHub Actions Secret `ARCLUME_RESOURCE_BASE_URL` 提供，并在构建时注入；源码和文档不得写入实际服务地址。
 
 ## 发布前检查
 
 1. 所有功能改动都已有 `CHANGELOG/unreleased/` 记录。
 2. README、Runtime 文档、第三方声明和发布说明与实际内容一致。
-3. 已确认本次发布的 DMG SHA-256 文件会随 Release 上传；应用内更新以 SHA-256、Bundle ID 和版本/构建号作为安装前校验。
+3. 已确认唯一发布 DMG `Arclume-<version>.dmg` 及其 SHA-256 文件会随 Release 上传；应用内更新以 SHA-256、Bundle ID 和版本/构建号作为安装前校验。
 4. 远端 `main` 已包含所有待发布提交，且本地/远端 SHA 一致。
 5. Runtime 变更已完成 Manifest、ABI、SHA-256 与迁移审核。
 
@@ -35,13 +36,12 @@ Runtime 版本从 `arclume-wine-runtime.json` 的 `version` 字段读取。不�
 
 | 资产 | 内容 |
 | --- | --- |
-| `Arclume-<version>-with-runtime.dmg` | 包含验证过的 Wine 归档，适合首次或离线初始化。 |
-| `Arclume-<version>-no-runtime.dmg` | 移除 Wine 归档，适合已有 Runtime 的用户。 |
-| `*.dmg.sha256` | 对应 DMG 的 SHA-256。 |
+| `Arclume-<version>.dmg` | 唯一安装包；不包含 Wine、D3D 运行组件或资源归档。App 按需从配置的对象存储资源源下载运行资源。 |
+| `Arclume-<version>.dmg.sha256` | 安装包的 SHA-256。 |
 
-每个 DMG 都由 `hdiutil verify` 校验。应用内更新会校验下载 DMG 的 SHA-256、Bundle ID、版本和构建号，然后使用暂存替换和回滚路径覆盖当前 App；不会校验发布 App 的开发者签名。
+DMG 由 `hdiutil verify` 校验。发布流程还会检查 App Bundle 中没有资源归档、DLL、Wine/D3D 运行组件或复制到 Resources 的 dylib。Manifest、JSON、INI 和第三方声明仍随 App 保留；已排除的独立 OTF 字体继续保持排除。应用内更新会校验下载 DMG 的 SHA-256、Bundle ID、版本和构建号，然后使用暂存替换和回滚路径覆盖当前 App；不会校验发布 App 的开发者签名。
 
-若仓库配置下列 GitHub Actions Secrets，workflow 仍会导入 Developer ID 证书并签名 Archive 和 DMG：
+`ARCLUME_RESOURCE_BASE_URL` 是发布所必需的 Secret。若仓库另行配置下列签名 Secrets，workflow 会导入 Developer ID 证书并签名 Archive 和 DMG：
 
 - `MACOS_APP_CERTIFICATE_P12_BASE64`
 - `MACOS_APP_CERTIFICATE_PASSWORD`
@@ -53,6 +53,6 @@ Runtime 版本从 `arclume-wine-runtime.json` 的 `version` 字段读取。不�
 ## 发布后验证
 
 1. 确认 GitHub Release tag、目标 commit、标题、资产和 SHA-256 全部正确。
-2. 验证 `with-runtime` 与 `no-runtime` 资产均可下载且大小合理。
-3. 在干净环境验证首次引导；`no-runtime` 缺少 Runtime 时应引导用户到“设置 → 更新”。
+2. 验证唯一 DMG、SHA-256 和 Release 资产均正确。
+3. 在干净环境验证首次引导及 OSS 运行资源下载、完整性校验和失败重试。
 4. 对已有用户，确认 App 更新不会移动 Games、Steam 或 CrossOver 容器，Runtime 更新不会覆盖用户 Prefix。

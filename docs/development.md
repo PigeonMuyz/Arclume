@@ -13,13 +13,18 @@
 
 | 区域 | 责任 |
 | --- | --- |
-| `Arclume/Components` | SwiftUI 页面、设置、工具栏与可见交互。 |
-| `Arclume/Services` | 游戏发现、Steam、元数据、运行状态与业务服务。 |
-| `Arclume/OnlineGame*.swift` | 剑网 3 发现、Bottle、配置、迁移、进程监控与启动。 |
-| `Arclume/BundledWineRuntime.swift` | 已验证 Runtime 的安装、校验、启动环境与原子更新。 |
+| `Arclume/App` | App 入口、场景、生命周期与模式状态。 |
+| `Arclume/Features` | 按功能划分的启动器、引导、设置、项目编辑、导入和剑网 3 页面。 |
+| `Arclume/Components/Shared` | 跨页面复用的基础 UI 组件。 |
+| `Arclume/Models` | 游戏、Steam、兼容性等共享数据类型。 |
+| `Arclume/Services` | 按领域划分的发现、启动、迁移、元数据、下载和更新服务。 |
+| `Arclume/Services/Runtime/BundledWineRuntime.swift` | 已验证 Runtime 的安装、校验、启动环境与原子更新。 |
+| `Arclume/Support` | 文件、配置、本地化等基础工具；Testing 中存放隔离预览与测试宿主。 |
 | `Arclume/Resources/OnlineGameDependencies` | LFS 管理的 Runtime、D3DMetal、字体和依赖。 |
 | `ArclumeTests` | 纯逻辑、文件格式、迁移与进程识别测试。 |
 | `ArclumeUITests` | SwiftUI 可访问性与首启流程 UI XCTest。 |
+
+完整分组和新增文件放置规则见 [项目目录](project-structure.md)。目录仅用于组织代码，不改变 Swift 模块或数据路径。
 
 ## 本地命令
 
@@ -31,11 +36,12 @@ xcodebuild \
   -scheme Arclume \
   -configuration Debug \
   -derivedDataPath /tmp/arclume-derived \
+  -onlyUsePackageVersionsFromResolvedFile \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
 
-`./script/pr_preflight.sh` 只读取 Git LFS 状态，并校验发布 Runtime 归档的 SHA-256；它不会运行 `git lfs fsck`，因此不会为检查而移动本地 LFS 对象。
+`./script/pr_preflight.sh` 只读取 Git LFS 状态，并检查 Runtime Manifest 结构和 SHA-256 字段格式、App 资源打包边界；它不读取大型归档进行哈希校验，也不会运行 `git lfs fsck` 或移动本地 LFS 对象。
 
 常用开发启动：
 
@@ -43,7 +49,7 @@ xcodebuild \
 ./script/build_and_run.sh run
 ```
 
-该脚本需要本地 `Arclume/Config.xcconfig`；不要提交它。
+`Arclume/Config.xcconfig` 是已纳入版本管理的默认配置；私有配置写入被忽略的 `Arclume/Config.local.xcconfig`，不要提交私有地址或凭据。
 
 运行脚本默认使用 Xcode 项目配置的 Apple Development 签名，需要对应团队的本地有效证书。
 不要用临时签名构建验证麦克风授权是否持久保存：临时签名的代码身份随构建变化，系统可能重新询问授权。

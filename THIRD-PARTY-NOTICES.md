@@ -9,6 +9,8 @@ The versions are pinned in `Arclume.xcodeproj/project.xcworkspace/xcshareddata/s
 - [Alamofire](https://github.com/Alamofire/Alamofire)
 - [Kingfisher](https://github.com/onevcat/Kingfisher)
 - [SwiftUI-Flow](https://github.com/tevelee/SwiftUI-Flow)
+- [SwiftSoup](https://github.com/scinfu/SwiftSoup) — 2.13.9, MIT; the upstream license is included in `Arclume/Resources/swiftsoup-license.txt` and the app bundle.
+- [cmark-gfm](https://github.com/swiftlang/swift-cmark) — 0.9.0, Markdown parsing and HTML generation; upstream notices are included in `Arclume/Resources/markdown-reader-licenses.txt` and the app bundle.
 
 ## Bundled Runtime and game-mode payloads
 

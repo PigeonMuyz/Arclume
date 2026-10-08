@@ -1,5 +1,5 @@
 {
-  "originHash" : "d0c9857863db332ad1cb04ffddf733ec5e0ac902c92c41130728bc41584a4df1",
+  "originHash" : "d2fd074041b70d5102ec13f361dbd1cfda12e42006376f089a15b0ecdcd98178",
   "pins" : [
     {
       "identity" : "alamofire",
@@ -17,6 +17,24 @@
       "state" : {
         "revision" : "cf8be20d07654570554c8a8a4952bc8a5766a8b0",
         "version" : "8.9.0"
+      }
+    },
+    {
+      "identity" : "swift-cmark",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-cmark",
+      "state" : {
+        "revision" : "08ddb528923cc1a6527e02b7a1aee9e516ca749a",
+        "version" : "0.9.0"
+      }
+    },
+    {
+      "identity" : "swiftsoup",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/scinfu/SwiftSoup.git",
+      "state" : {
+        "revision" : "18b80329749eca5ea29fc50211dca5c7eff5bfec",
+        "version" : "2.13.9"
       }
     },
     {

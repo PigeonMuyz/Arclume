@@ -4,5 +4,8 @@ API_PATH =
 API_PATH_M =
 API_PATH_CUSTOM =
 API_KEY =
+ARCLUME_RESOURCE_BASE_URL =
 
 #include? "Config.local.xcconfig"
+
+EXCLUDED_SOURCE_FILE_NAMES = $(inherited) *.tar.xz *.tar.gz

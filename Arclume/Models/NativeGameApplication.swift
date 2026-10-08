@@ -1,6 +1,6 @@
 //
 //  NativeGameApplication.swift
-//  Procyon
+//  Arclume
 //
 
 import Foundation

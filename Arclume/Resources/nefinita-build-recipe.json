@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "provider": "Nefinita",
+  "revision": "cadaabf0705efa677e4683a2af86d1da3316e8bb",
+  "version": "0.3.0",
+  "files": {
+    "sources/FREETYPE_SOURCE.lock": "f83bd81beff3325b62c54f13ebdb1402a1e72341023bc54ef783c554a80e7181",
+    "sources/FINEWINE_PATCHSET.lock": "d743b8e05913bcfd64beeb44ff4d6c014be4f468320ad4a2a050cadbc208ef36",
+    "patches/finewine/PATCH_ORDER": "d9a3eea810dec3695e3a1f78c06264e20bfef750c8a2d6ef14ce00b430e7ca95",
+    "entitlements/wine-hosted-process.plist": "68fad85cc361e7689454513355d5326046f995b90a165dceffd27bac36e0a771",
+    "patches/finewine/PATCHES.sha256": "7259e25249b054dad631cfd6303f8bff9b0cd36fd67fa35f90da7979d4c9e5d1",
+    "script/sync-wine-source.sh": "449741419e3d90dc04787ba2606042b3fe15a2d06fbe596ee21238ed21b4a68d",
+    "script/lib.sh": "d3a48fd0e43b8acb4bae327a4e20ab9750857af3f771837a7bf68c1de10477eb",
+    "script/sync-deps.sh": "c7550aa86dd2c31ba64206548fad0d6f1a7fbd40bbeefce63ef05c1f4bbd76da",
+    "sources/WINE_SOURCE.lock": "28efbe4116f87db9d1f56de49f6b100096118abf80ffe22e9b994c80bfe2c596",
+    "runtime.env": "b2cb3416f51f3e148b6d7ca81d9f518c13d6afdc90bf03546002f22292805786",
+    "sources/DEPENDENCIES.lock": "c565e04da2b7a47703bbea4c888932c40afd98c251f6f7aa379c9914916afb6d",
+    "script/apply-finewine.sh": "8d143d2414c655b4e123ef0c568b156c411749be892fdb511e3a5b61e39f5f69",
+    "script/build-runtime.sh": "0f9d16cff1b4ff7e2aa858a2c8034d3ee8268a1c33fd60aa9ac10683bf96b6ad"
+  }
+}

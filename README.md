@@ -18,7 +18,7 @@ Arclume 用一个本地游戏库管理 macOS 原生游戏、Steam 原生游戏�
 - **统一运行环境**：Windows 应用使用 `Application Support/Arclume/ALBottles`；旧版容器通过应用内升级流程迁移。Steam 和剑网3启动器均可选配置。
 - **新的设置与项目编辑**：管理运行选项，匹配 Steam、App Store 等来源的名称、简介、背景与标志；优先采用当前应用语言的资料。
 - **首次使用引导**：全窗口欢迎页、真实功能区域的箭头指引，以及可选的迁移与初始化流程。
-- **独立 Runtime 更新**：D3DMetal 3 / 4、DXVK、msync、Metal HUD；应用和运行环境分别检查更新。
+- **按需运行组件**：D3DMetal 3 / 4、DXVK、msync、Metal HUD；运行环境按 App 的固定组件清单下载和校验。
 
 ![已安装应用启动台](docs/screenshots/launchpad-2.0.png)
 
@@ -36,12 +36,9 @@ Arclume 用一个本地游戏库管理 macOS 原生游戏、Steam 原生游戏�
 
 ### 安装与更新
 
-Release 提供两种 DMG：
+后续 Release 统一提供 `Arclume-<版本>.dmg`，不再区分 `with-runtime` 和 `no-runtime`。首次初始化或在“设置 → 运行环境”中点击下载运行组件，安装包本身不包含 Wine、D3DMetal、DXVK 等运行库。组件完整时复用本地文件，普通游戏启动不会自动下载。
 
-| 文件 | 适用场景 |
-| --- | --- |
-| `with-runtime` | 首次安装或需要离线初始化 Arclume Wine 的用户。 |
-| `no-runtime` | 已安装 Runtime 或希望减小下载体积的用户；可在“设置 → 更新”下载 Runtime。 |
+DMG 同时保存于 GitHub 和对象存储。对象存储保留最近两个 App 版本、每种运行时最近三个版本，并保留这些 App 所依赖的共享组件；不会因此清理用户本机文件。分发与配置说明见 [运行组件下载分发](docs/resource-distribution.md)。
 
 每个 DMG 都附带 SHA-256 文件。应用内更新会下载 Release 的 DMG，校验 SHA-256、Bundle ID 和版本/构建号后覆盖安装并重启；因此未配置 Developer ID 证书的 Actions 产物也可作为更新来源。Developer ID 签名与公证状态以对应 Release 说明为准。
 
@@ -53,10 +50,13 @@ Release 提供两种 DMG：
 | --- | --- |
 | `Arclume/` | SwiftUI App、启动器、Bottle、游戏库与资源。 |
 | `ArclumeTests/` | 核心逻辑测试，主要使用 Swift Testing。 |
-| `ArclumeUITests/`、`ArclumeUITestsLaunchTests.swift` | 需要交互桌面会话的 UI XCTest。 |
+| `ArclumeUITests/` | 需要交互桌面会话的 UI XCTest。 |
 | `script/` | 本地构建、Runtime 嵌入和开发辅助脚本。 |
 | `CHANGELOG/` | 不可覆盖的变更记录；每个逻辑改动必须新增条目。 |
 | `docs/` | 架构、开发、测试、Runtime、发布与审核规范。 |
+| `design/` | 图标设计源文件，不参与 App 打包。 |
+
+源码已按功能与服务领域分组，详见 [项目目录与放置规则](docs/project-structure.md)。
 
 Wine 的源代码锁定、补丁与独立归档由 `Arclume-Runtime` 项目维护；本仓库通过 Runtime Manifest 固定 ABI、版本、归档名和 SHA-256。详见 [Runtime 文档](docs/runtime.md)。
 
@@ -119,7 +119,7 @@ Arclume is an independent, community-driven macOS game launcher. It manages nati
 - A unified ALBottles environment with an in-app legacy migration flow. Steam and JX3 setup are optional.
 - Redesigned settings, project editing, localized Steam/App Store metadata matching, artwork, and guided onboarding.
 - An independently versioned Arclume Wine Runtime with D3DMetal 3/4, DXVK, msync and Metal HUD.
-- Separate application and Runtime update checks, automatic fallback, built-in mirrors, and custom HTTPS update sources.
+- Application update checks and an App-pinned component catalog, with explicit downloads during setup or from runtime settings.
 
 ### Requirements
 
@@ -129,10 +129,9 @@ Arclume is an independent, community-driven macOS game launcher. It manages nati
 
 ### Distribution
 
-Each Release contains two DMGs and matching SHA-256 files. Developer ID signing and notarization status are stated in the corresponding Release notes:
+Future releases contain one `Arclume-<version>.dmg` and its SHA-256 file, without bundled runtime libraries. Download components explicitly during setup or from **Settings → Runtime Environment**; completed local components are reused. Developer ID signing and notarization status are stated in the corresponding Release notes.
 
-- `with-runtime` includes the verified Wine archive for first-run or offline setup.
-- `no-runtime` is smaller and is intended for users who already have a Runtime; the Runtime can be downloaded in **Settings → Updates**.
+DMGs are mirrored to object storage alongside GitHub. Object storage retains the two latest App releases and three versions per runtime, protecting dependencies referenced by retained App catalogs. This does not delete local user data or GitHub Releases.
 
 Application updates verify the DMG SHA-256, bundle ID, and version/build before staging, replacing, and restarting; they do not require matching Developer ID signatures. Runtime updates validate their Manifest, ABI and SHA-256, then atomically replace only the runtime files. Legacy container migration is a separate in-app upgrade flow. Starting with 2.0.1, it inventories file metadata without reading or hashing game contents, and delegates copying to the OS. Old containers are removed after successful migration rather than retained as duplicate copies; copy errors stop activation and leave recovery available.
 

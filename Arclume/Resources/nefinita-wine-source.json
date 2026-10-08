@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "version": "26.3.0",
+  "archive": "crossover-sources-26.3.0.tar.gz",
+  "sha256": "ac99c8ca4b3848f3e81784135f023df266b61c2345726ea55a50b3e030dd6872",
+  "byteCount": 149054023,
+  "originURL": "https://media.codeweavers.com/pub/crossover/source/crossover-sources-26.3.0.tar.gz",
+  "objectKey": "components/source/codeweavers-wine/org.codeweavers.wine-source/26.3.0/ac99c8ca4b3848f3e81784135f023df266b61c2345726ea55a50b3e030dd6872/crossover-sources-26.3.0.tar.gz"
+}

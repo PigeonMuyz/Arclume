@@ -15,6 +15,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: arclume-release-resources
+  cancel-in-progress: false
+
 jobs:
   build-and-release:
     name: 构建 macOS DMG
@@ -30,6 +34,7 @@ jobs:
       MACOS_APP_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_APP_CERTIFICATE_PASSWORD }}
       MACOS_SIGNING_IDENTITY: ${{ secrets.MACOS_SIGNING_IDENTITY }}
       MACOS_DEVELOPER_TEAM_ID: ${{ secrets.MACOS_DEVELOPER_TEAM_ID }}
+      ARCLUME_RESOURCE_BASE_URL: ${{ secrets.ARCLUME_RESOURCE_BASE_URL }}
 
     steps:
       - name: 检出源代码和 LFS 资源
@@ -51,10 +56,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          if [ -z "$ARCLUME_RESOURCE_BASE_URL" ]; then
+            echo "未配置 ARCLUME_RESOURCE_BASE_URL Secret，无法构建发布版本。" >&2
+            exit 1
+          fi
+
           build_settings=$(xcodebuild -showBuildSettings \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
-            -configuration Release)
+            -configuration Release -onlyUsePackageVersionsFromResolvedFile)
           version=$(printf '%s\n' "$build_settings" | awk -F ' = ' '/^[[:space:]]*MARKETING_VERSION = / { print $2; exit }')
           build=$(printf '%s\n' "$build_settings" | awk -F ' = ' '/^[[:space:]]*CURRENT_PROJECT_VERSION = / { print $2; exit }')
           test -n "$version"
@@ -116,6 +126,9 @@ jobs:
             echo "发布签名凭据未配置：本次产物未签名、未公证，但可通过 DMG SHA-256 校验用于应用内更新。"
           fi
 
+      - name: 准备并核对固定组件清单
+        run: python3 script/prepare_downloadable_resources.py
+
       - name: 导入 Developer ID 签名证书
         if: steps.signing.outputs.enabled == 'true'
         env:
@@ -146,11 +159,13 @@ jobs:
             -configuration Release \
             -destination "generic/platform=macOS" \
             -archivePath "$archive_path" \
+            -onlyUsePackageVersionsFromResolvedFile \
             CODE_SIGNING_ALLOWED=YES \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
             DEVELOPMENT_TEAM="$MACOS_DEVELOPER_TEAM_ID" \
             OTHER_CODE_SIGN_FLAGS="--timestamp" \
+            ARCLUME_RESOURCE_BASE_URL="$ARCLUME_RESOURCE_BASE_URL" \
             SWIFT_EMIT_LOC_STRINGS=NO
           codesign --verify --deep --strict --verbose=2 "$archive_path/Products/Applications/Arclume.app"
           codesign --display --verbose=4 "$archive_path/Products/Applications/Arclume.app"
@@ -165,12 +180,14 @@ jobs:
             -configuration Release \
             -destination "generic/platform=macOS" \
             -archivePath "$archive_path" \
+            -onlyUsePackageVersionsFromResolvedFile \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY=- \
+            ARCLUME_RESOURCE_BASE_URL="$ARCLUME_RESOURCE_BASE_URL" \
             SWIFT_EMIT_LOC_STRINGS=NO
 
-      - name: 制作含 Runtime 与轻量 DMG
+      - name: 制作单个发布 DMG
         id: package
         env:
           VERSION: ${{ steps.release.outputs.version }}
@@ -190,74 +207,72 @@ jobs:
           test "$bundle_version" = "$VERSION"
           test "$bundle_build" = "$BUILD"
 
+          resources_path="$full_app_path/Contents/Resources"
+          test -d "$resources_path"
+          for required_resource in \
+            arclume-wine-runtime.json \
+            downloadable-resources.json \
+            THIRD-PARTY-NOTICES.txt \
+            jx3-gpu-profiles.json \
+            jx3-normal-config.ini; do
+            test -f "$resources_path/$required_resource" || {
+              echo "发布 App 缺少保留的资源文件：$required_resource" >&2
+              exit 1
+            }
+          done
+
+          unexpected_payloads=$(find "$full_app_path/Contents" \
+            \( \
+              -iname '*.tar.xz' -o \
+              -iname '*.tar.gz' -o \
+              -iname '*.dll' -o \
+              -iname '*.so' \
+            \) -print)
+          unexpected_resource_libraries=$(find "$resources_path" \
+            \( \
+              \( -iname '*.dylib' \) -o \
+              \( -type d \( \
+                -iname 'Libs' -o \
+                -iname 'd3dMetal3' -o \
+                -iname 'd3dMetal4' -o \
+                -iname 'D3DMetal.framework' -o \
+                -iname 'd9vk' -o \
+                -iname 'dxvk' -o \
+                -iname 'wine' \
+              \) \) \
+            \) -print)
+          if [ -n "$unexpected_payloads" ] || [ -n "$unexpected_resource_libraries" ]; then
+            printf '发布 App 含不应打包的运行资源：\n%s\n%s\n' \
+              "$unexpected_payloads" "$unexpected_resource_libraries" >&2
+            exit 1
+          fi
+
           # Self-hosted runners can retain RUNNER_TEMP between jobs.  Keep all
           # temporary package paths unique to this workflow attempt so a failed
           # prior attempt never blocks a later release.
           mkdir -p "$artifact_dir"
-          full_dmg_path="$artifact_dir/Arclume-${VERSION}-with-runtime.dmg"
-          lite_dmg_path="$artifact_dir/Arclume-${VERSION}-no-runtime.dmg"
-
+          dmg_path="$artifact_dir/Arclume-${VERSION}.dmg"
           hdiutil create \
             -volname "Arclume" \
             -srcfolder "$full_app_path" \
             -format UDZO \
             -imagekey zlib-level=9 \
-            "$full_dmg_path"
-          hdiutil verify "$full_dmg_path"
-
-          # The archived App is an isolated build product.  Temporarily move its
-          # Runtime archive out of the bundle to make the no-runtime DMG, then
-          # restore it even if packaging fails.  This avoids making any second App
-          # tree on a runner with limited temporary storage.
-          runtime_manifest="Arclume/Resources/OnlineGameDependencies/arclume-wine-runtime.json"
-          runtime_archive_name=$(plutil -extract archive.name raw "$runtime_manifest")
-          # Xcode flattens this synchronized resource directory into the bundle's
-          # Resources root.  Use the archived App layout rather than the source path.
-          runtime_archive="$full_app_path/Contents/Resources/$runtime_archive_name"
-          runtime_archive_staging="$package_root/$runtime_archive_name"
-          test -f "$runtime_archive"
-          restore_runtime_archive() {
-            if [ -f "$runtime_archive_staging" ]; then
-              mv "$runtime_archive_staging" "$runtime_archive"
-            fi
-          }
-          mv "$runtime_archive" "$runtime_archive_staging"
-          trap restore_runtime_archive EXIT
-          if [ "$SIGNED_RELEASE" = "true" ]; then
-            signing_identity="${MACOS_SIGNING_IDENTITY:-Developer ID Application}"
-            codesign --force --sign "$signing_identity" --timestamp \
-              --preserve-metadata=identifier,entitlements,requirements,flags,runtime \
-              "$full_app_path"
-          fi
-          hdiutil create \
-            -volname "Arclume" \
-            -srcfolder "$full_app_path" \
-            -format UDZO \
-            -imagekey zlib-level=9 \
-            "$lite_dmg_path"
-          hdiutil verify "$lite_dmg_path"
-          restore_runtime_archive
-          trap - EXIT
+            "$dmg_path"
+          hdiutil verify "$dmg_path"
 
           if [ "$SIGNED_RELEASE" = "true" ]; then
             signing_identity="${MACOS_SIGNING_IDENTITY:-Developer ID Application}"
-            codesign --force --sign "$signing_identity" --timestamp "$full_dmg_path"
-            codesign --force --sign "$signing_identity" --timestamp "$lite_dmg_path"
-            hdiutil verify "$full_dmg_path"
-            hdiutil verify "$lite_dmg_path"
+            codesign --force --sign "$signing_identity" --timestamp "$dmg_path"
+            hdiutil verify "$dmg_path"
           fi
 
-          full_checksum_path="$full_dmg_path.sha256"
-          lite_checksum_path="$lite_dmg_path.sha256"
-          shasum -a 256 "$full_dmg_path" > "$full_checksum_path"
-          shasum -a 256 "$lite_dmg_path" > "$lite_checksum_path"
+          checksum_path="$dmg_path.sha256"
+          shasum -a 256 "$dmg_path" > "$checksum_path"
 
           {
             echo "artifact_dir=$artifact_dir"
-            echo "full_dmg_path=$full_dmg_path"
-            echo "lite_dmg_path=$lite_dmg_path"
-            echo "full_checksum_path=$full_checksum_path"
-            echo "lite_checksum_path=$lite_checksum_path"
+            echo "dmg_path=$dmg_path"
+            echo "checksum_path=$checksum_path"
             echo "signed_release=$SIGNED_RELEASE"
           } >> "$GITHUB_OUTPUT"
 
@@ -268,29 +283,41 @@ jobs:
           path: ${{ steps.package.outputs.artifact_dir }}
           if-no-files-found: error
 
+      - name: 上传并校验对象存储资源
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.ARCLUME_OSS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ARCLUME_OSS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.ARCLUME_OSS_REGION }}
+          AWS_ENDPOINT_URL: ${{ secrets.ARCLUME_OSS_ENDPOINT_URL }}
+          ARCLUME_RESOURCE_BUCKET: ${{ secrets.ARCLUME_RESOURCE_BUCKET }}
+          VERSION: ${{ steps.release.outputs.version }}
+          BUILD: ${{ steps.release.outputs.build }}
+          DMG_PATH: ${{ steps.package.outputs.dmg_path }}
+        run: |
+          set -euo pipefail
+          if ! command -v aws >/dev/null; then brew install awscli; fi
+          python3 script/upload_resources.py \
+            --dmg "$DMG_PATH" --app-version "$VERSION" --app-build "$BUILD" --execute
+
       - name: 发布 GitHub Release
         env:
           TAG: ${{ steps.release.outputs.tag }}
           BUILD: ${{ steps.release.outputs.build }}
           RELEASE_NAME: ${{ steps.release.outputs.release_name }}
           RUNTIME_VERSION: ${{ steps.release.outputs.runtime_version }}
-          FULL_DMG_PATH: ${{ steps.package.outputs.full_dmg_path }}
-          LITE_DMG_PATH: ${{ steps.package.outputs.lite_dmg_path }}
-          FULL_CHECKSUM_PATH: ${{ steps.package.outputs.full_checksum_path }}
-          LITE_CHECKSUM_PATH: ${{ steps.package.outputs.lite_checksum_path }}
+          DMG_PATH: ${{ steps.package.outputs.dmg_path }}
+          CHECKSUM_PATH: ${{ steps.package.outputs.checksum_path }}
           SIGNED_RELEASE: ${{ steps.package.outputs.signed_release }}
         run: |
           set -euo pipefail
 
-          full_checksum=$(awk '{print $1}' "$FULL_CHECKSUM_PATH")
-          lite_checksum=$(awk '{print $1}' "$LITE_CHECKSUM_PATH")
+          checksum=$(awk '{print $1}' "$CHECKSUM_PATH")
           notes=$(printf '%s\n' \
             "由 GitHub Actions 的 macos-26 runner 自动构建。" \
             "" \
             "- 应用：$RELEASE_NAME" \
-            "- Arclume Wine：$RUNTIME_VERSION" \
-            "- with-runtime：首次安装可直接初始化内置 Wine。" \
-            "- no-runtime：不含 Wine 归档，适合已有 Runtime 的用户；可在应用设置中下载 Runtime。" \
+            "- Arclume Wine：$RUNTIME_VERSION（按资源清单从对象存储下载，不包含在安装包中。）" \
+            "- D3DMetal、Wine 和其他运行资源由应用按需从配置的资源源下载；安装包不包含运行组件或资源归档。" \
             "- 要求 macOS 26.0 或更高版本。" \
             "" \
             "源代码与第三方声明：" \
@@ -299,8 +326,8 @@ jobs:
             "- 组件声明：https://github.com/PigeonMuyz/Arclume/blob/$TAG/THIRD-PARTY-NOTICES.md" \
             "- D3DMetal 是 Apple 提供的兼容性组件，不属于 Arclume GPL 源码，也不被 Arclume 声明为开源。" \
             "" \
-            "with-runtime SHA-256：$full_checksum" \
-            "no-runtime SHA-256：$lite_checksum" \
+            "DMG：Arclume-${TAG#v}.dmg" \
+            "SHA-256：$checksum" \
             "" \
             "$(if [ "$SIGNED_RELEASE" = "true" ]; then
                 printf '%s' 'App 已使用 Developer ID 签名；尚未自动公证。应用内更新以 DMG SHA-256、Bundle ID 和版本/构建号校验后安装。'
@@ -327,10 +354,8 @@ jobs:
           fi
 
           gh release upload "$TAG" \
-            "$FULL_DMG_PATH" \
-            "$LITE_DMG_PATH" \
-            "$FULL_CHECKSUM_PATH" \
-            "$LITE_CHECKSUM_PATH" \
+            "$DMG_PATH" \
+            "$CHECKSUM_PATH" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
           gh release edit "$TAG" \
@@ -339,3 +364,26 @@ jobs:
             --notes "$notes" \
             --prerelease=false \
             --latest
+
+      - name: 按兼容保留规则清理过期对象
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.ARCLUME_OSS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.ARCLUME_OSS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.ARCLUME_OSS_REGION }}
+          AWS_ENDPOINT_URL: ${{ secrets.ARCLUME_OSS_ENDPOINT_URL }}
+          ARCLUME_RESOURCE_BUCKET: ${{ secrets.ARCLUME_RESOURCE_BUCKET }}
+          VERSION: ${{ steps.release.outputs.version }}
+          BUILD: ${{ steps.release.outputs.build }}
+          DMG_PATH: ${{ steps.package.outputs.dmg_path }}
+        run: |
+          python3 script/upload_resources.py \
+            --dmg "$DMG_PATH" --app-version "$VERSION" --app-build "$BUILD" \
+            --execute --apply-retention
+
+      - name: 保存对象存储发布报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Arclume-resource-report-${{ github.run_id }}
+          path: build/resource-upload/publish-report.json
+          if-no-files-found: ignore

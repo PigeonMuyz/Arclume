@@ -56,7 +56,7 @@ check_change_log() {
 printf '== Arclume PR 前置审核 ==\n'
 cd "$project_root"
 
-for command_name in git jq ruby shasum xcodebuild; do
+for command_name in git jq ruby xcodebuild; do
   require_command "$command_name"
 done
 
@@ -75,9 +75,8 @@ check_change_log "$changed_files"
 
 printf '检查 Git LFS 状态…\n'
 # `git lfs fsck` may move unavailable local objects into .git/lfs/bad. A PR
-# preflight must be non-mutating: the release-critical Runtime archive is
-# verified by its exact SHA-256 below, while `git lfs status` exposes pending
-# LFS changes without altering the local object store.
+# preflight must be non-mutating; `git lfs status` only reports pending LFS
+# changes and does not require downloading the Runtime archive.
 git lfs status
 
 printf '校验 Runtime Manifest…\n'
@@ -92,18 +91,31 @@ jq -e '
   (.archive.sha256 | type == "string" and test("^[a-f0-9]{64}$"))
 ' "$manifest_path" >/dev/null || fail "Runtime Manifest 结构或版本格式无效。"
 
-archive_name="$(jq -r '.archive.name' "$manifest_path")"
-archive_sha256="$(jq -r '.archive.sha256' "$manifest_path")"
-archive_path="$project_root/Arclume/Resources/OnlineGameDependencies/$archive_name"
-[ -f "$archive_path" ] || fail "Runtime 归档不存在：$archive_name"
-actual_sha256="$(shasum -a 256 "$archive_path" | awk '{print $1}')"
-[ "$actual_sha256" = "$archive_sha256" ] || fail "Runtime 归档 SHA-256 与 Manifest 不一致。"
+printf '检查运行资源打包排除…\n'
+resource_build_settings="$project_root/Arclume/Config.xcconfig"
+for archive_pattern in '*.tar.xz' '*.tar.gz'; do
+  grep -F -q "$archive_pattern" "$resource_build_settings" \
+    || fail "Config.xcconfig 未排除运行资源归档格式：$archive_pattern"
+done
+target_exclusions="$(sed -n \
+  '/Begin PBXFileSystemSynchronizedBuildFileExceptionSet section/,/End PBXFileSystemSynchronizedBuildFileExceptionSet section/p' \
+  "$project_path/project.pbxproj")"
+printf '%s\n' "$target_exclusions" | grep -F -q 'Libs,' \
+  || fail "Arclume/Libs 未从 App target membership 中排除。"
+explicit_folders="$(sed -n '/explicitFolders = (/,/);/p' "$project_path/project.pbxproj")"
+printf '%s\n' "$explicit_folders" | grep -F -q 'Libs,' \
+  || fail "Arclume/Libs 未作为显式目录处理，可能递归加入 App 资源。"
+if grep -F -q 'PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet' "$project_path/project.pbxproj"; then
+  fail "请使用 target-level membership exclusion，避免 phase exception 将 Libs 资源纳入复制。"
+fi
+
+online_resources="$project_root/Arclume/Resources/OnlineGameDependencies"
 
 printf '校验 GitHub Actions YAML…\n'
 ruby -e 'require "yaml"; ARGV.each { |path| YAML.load_file(path) }' .github/workflows/*.yml
 
 printf '读取 Xcode 版本设置…\n'
-build_settings="$(xcodebuild -showBuildSettings -project "$project_path" -scheme "$scheme" -configuration Debug)"
+build_settings="$(xcodebuild -showBuildSettings -project "$project_path" -scheme "$scheme" -configuration Debug -onlyUsePackageVersionsFromResolvedFile)"
 marketing_version="$(printf '%s\n' "$build_settings" | awk -F ' = ' '/^[[:space:]]*MARKETING_VERSION = / { print $2; exit }')"
 build_number="$(printf '%s\n' "$build_settings" | awk -F ' = ' '/^[[:space:]]*CURRENT_PROJECT_VERSION = / { print $2; exit }')"
 [ -n "$marketing_version" ] || fail "无法读取 MARKETING_VERSION。"
@@ -116,9 +128,56 @@ xcodebuild build \
   -scheme "$scheme" \
   -configuration Debug \
   -derivedDataPath "$derived_data" \
+  -onlyUsePackageVersionsFromResolvedFile \
   CODE_SIGNING_ALLOWED=NO \
   CODE_SIGNING_REQUIRED=NO \
   CODE_SIGN_IDENTITY=- \
   SWIFT_EMIT_LOC_STRINGS=NO
 
-printf '通过：Arclume %s (%s)，Runtime SHA-256 已核对，未运行 XCTest。\n' "$marketing_version" "$build_number"
+app_path="$derived_data/Build/Products/Debug/Arclume.app"
+resources_path="$app_path/Contents/Resources"
+[ -d "$app_path" ] || fail "Debug build 未生成 Arclume.app。"
+[ -d "$resources_path" ] || fail "App Bundle 缺少 Resources 目录。"
+
+for helper in wine-keepalive.exe yy-launch-support.exe; do
+  [ -f "$resources_path/$helper" ] || fail "App Bundle 缺少必须保留的运行辅助程序：$helper"
+done
+
+while IFS= read -r source_resource; do
+  resource_name="${source_resource##*/}"
+  [ -f "$resources_path/$resource_name" ] \
+    || fail "App Bundle 缺少保留的 JSON、INI 或第三方声明：$resource_name"
+done < <(find "$online_resources" -type f \( \
+  -iname '*.json' -o \
+  -iname '*.ini' -o \
+  -iname '*NOTICE*.txt' \
+\) -print)
+
+unexpected_payloads="$(find "$app_path/Contents" \
+  \( \
+    -iname '*.tar.xz' -o \
+    -iname '*.tar.gz' -o \
+    -iname '*.dll' -o \
+    -iname '*.so' \
+  \) -print)"
+unexpected_resource_libraries="$(find "$resources_path" \
+  \( \
+    \( -iname '*.dylib' \) -o \
+    \( -type d \( \
+      -iname 'Libs' -o \
+      -iname 'd3dMetal3' -o \
+      -iname 'd3dMetal4' -o \
+      -iname 'D3DMetal.framework' -o \
+      -iname 'd9vk' -o \
+      -iname 'dxvk' -o \
+      -iname 'wine' \
+    \) \) \
+  \) -print)"
+if [ -n "$unexpected_payloads" ] || [ -n "$unexpected_resource_libraries" ]; then
+  printf '前置审核失败：App Bundle 含不应打包的运行资源：\n%s\n%s\n' \
+    "$unexpected_payloads" "$unexpected_resource_libraries" >&2
+  exit 1
+fi
+
+printf '通过：Arclume %s (%s)，App Bundle 不含运行归档或 Wine/D3D 运行组件，未运行 XCTest。\n' \
+  "$marketing_version" "$build_number"
