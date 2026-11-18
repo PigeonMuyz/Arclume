@@ -30,22 +30,18 @@ struct ArclumeApp: App {
     @NSApplicationDelegateAdaptor(ArclumeAppDelegate.self) private var appDelegate
     @StateObject private var appSettings: AppSettings
     @StateObject private var updateService: ArclumeUpdateService
-    private let resetError: String?
+    @StateObject private var resetCoordinator = ArclumeResetCoordinator.shared
+    private let resumesReset: Bool
 
     init() {
-        var failure: String?
-        if !ArclumeTestEnvironment.isTesting {
-            do {
-                try ArclumeResetService.performPendingReset()
-                migrateLegacyAppDataIfNeeded()
-                LegacyBottleDirectory.removeEmptyDirectory(in: ARCLUME_SUPPORT_FOLDER_URL)
-                migrateLegacyDefaultsIfNeeded()
-                migrateUnavailableConfiguredMetadataSourceIfNeeded()
-            } catch {
-                failure = error.localizedDescription
-            }
+        let pending = !ArclumeTestEnvironment.isTesting && ArclumeResetService.hasPendingReset
+        resumesReset = pending
+        if !ArclumeTestEnvironment.isTesting && !pending {
+            migrateLegacyAppDataIfNeeded()
+            LegacyBottleDirectory.removeEmptyDirectory(in: ARCLUME_SUPPORT_FOLDER_URL)
+            migrateLegacyDefaultsIfNeeded()
+            migrateUnavailableConfiguredMetadataSourceIfNeeded()
         }
-        resetError = failure
         _appSettings = StateObject(wrappedValue: AppSettings())
         _updateService = StateObject(wrappedValue: ArclumeUpdateService())
     }
@@ -56,6 +52,9 @@ struct ArclumeApp: App {
                 .environment(\.locale, appSettings.language.locale)
                 .environmentObject(appSettings)
                 .environmentObject(updateService)
+                .task {
+                    if resumesReset && !resetCoordinator.isActive { resetCoordinator.start() }
+                }
                 .onAppear {
                     // Disable "Show Tab Bar" globally
                     NSWindow.allowsAutomaticWindowTabbing = false
@@ -74,14 +73,8 @@ struct ArclumeApp: App {
     }
     @ViewBuilder
     private var appContent: some View {
-        if let resetError {
-            VStack(spacing: 16) {
-                Text("重置尚未完成").font(.title2)
-                Text(resetError)
-                Text("本次未加载游戏库。请按上方错误处理后重新打开 Arclume，程序会继续完成重置；已移入废纸篓的数据仍可恢复。")
-                    .fixedSize(horizontal: false, vertical: true)
-                Button("退出") { NSApp.terminate(nil) }
-            }.padding(32).frame(width: 580)
+        if resetCoordinator.isActive || resumesReset {
+            ArclumeResetProgressView(coordinator: resetCoordinator)
         } else {
         #if DEBUG
         if ArclumeTestEnvironment.isUIFixture {

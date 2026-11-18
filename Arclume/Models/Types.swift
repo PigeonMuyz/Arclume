@@ -12,9 +12,8 @@ typealias DropdownOptions = [(id: String, label: String)]
 
 var cxGraphicsBackend: DropdownOptions {
     [
-        (id: "dxmt", label: "DXMT"),
-        (id: "d3dmetal3", label: "D3Dmetal3"),
-        (id: "d3dmetal4", label: "D3DMetal 4 (Beta 2)"),
+        (id: "dxmt", label: "DXMT 0.80"),
+        (id: "d3dmetal4", label: "D3DMetal 4 (Beta 3)"),
         (id: "wined3d", label: "Wine"),
         (id: "dxvk", label: "DXVK"),
         (id: "auto", label: L10n.string("Auto"))
@@ -149,6 +148,7 @@ nonisolated struct GameOptionsData: Codable { // this is used for reading saved 
     var dlssFrameGenerationEnabled: Bool?
     var externalQualitySettingsEnabled: Bool?
     var closeLauncherWhenGameStarts: Bool?
+    var jx3SkipLauncher: Bool?
     var dx9PatchEnabled: Bool?
     var gameArguments: String?
     var dxmtPreferredMaxFrameRate: Double?
@@ -166,6 +166,8 @@ nonisolated struct GameOptionsData: Codable { // this is used for reading saved 
     var d3dMEnableMetalFX: String?
     var d3dSupportDXR: String?
     var d3dMaxFPS: Double?
+
+    init() {}
     
     @MainActor
     init(data: GameOptions) {
@@ -175,6 +177,7 @@ nonisolated struct GameOptionsData: Codable { // this is used for reading saved 
         self.dlssFrameGenerationEnabled = data.dlssFrameGenerationEnabled
         self.externalQualitySettingsEnabled = data.externalQualitySettingsEnabled
         self.closeLauncherWhenGameStarts = data.closeLauncherWhenGameStarts
+        self.jx3SkipLauncher = data.jx3SkipLauncher
         self.dx9PatchEnabled = data.dx9PatchEnabled
         self.gameArguments = data.gameArguments
         self.dxmtPreferredMaxFrameRate = data.dxmtPreferredMaxFrameRate
@@ -196,6 +199,31 @@ nonisolated struct GameOptionsData: Codable { // this is used for reading saved 
     }
 }
 
+@MainActor
+enum GameOptionsPersistence {
+    static func read(key: String, defaults: UserDefaults? = nil) -> GameOptionsData {
+        let store = defaults ?? UserDefaults(suiteName: suiteName)
+        guard let data = store?.data(forKey: key),
+              let saved = try? JSONDecoder().decode(GameOptionsData.self, from: data) else {
+            return GameOptionsData()
+        }
+        return saved
+    }
+
+    /// Merge an explicit user action into saved options without saving another view's stale form.
+    static func update(
+        key: String,
+        defaults: UserDefaults? = nil,
+        update: (inout GameOptionsData) -> Void
+    ) {
+        guard let defaults = defaults ?? UserDefaults(suiteName: suiteName) else { return }
+        var saved = read(key: key, defaults: defaults)
+        update(&saved)
+        guard let encoded = try? JSONEncoder().encode(saved) else { return }
+        defaults.set(encoded, forKey: key)
+    }
+}
+
 class GameOptions: ObservableObject { // this is used as form state
     @Published var cxGraphicsBackend: String
     @Published var wineMSync: Bool
@@ -203,6 +231,7 @@ class GameOptions: ObservableObject { // this is used as form state
     @Published var dlssFrameGenerationEnabled: Bool
     @Published var externalQualitySettingsEnabled: Bool
     @Published var closeLauncherWhenGameStarts: Bool
+    @Published var jx3SkipLauncher: Bool
     @Published var dx9PatchEnabled: Bool
     @Published var gameArguments: String
     @Published var dxmtPreferredMaxFrameRate: Double
@@ -222,13 +251,14 @@ class GameOptions: ObservableObject { // this is used as form state
     @Published var d3dMtl4Enabled: Bool
     @Published var d3dMaxFPS: Double
     
-    init(cxGraphicsBackend: String = "d3dmetal", wineMSync: Bool = true, mtlHudEnabled: Bool = false, d3dMtl4Enabled: Bool = false, dx9PatchEnabled: Bool = false, gameArguments: String = "", dxmtPreferredMaxFrameRate: Double = 0, dxmtMetalFXSpatial: Bool = false, dxmtMetalSpatialUpscaleFactor: Double = 1.0, advertiseAVX: Bool = true, envVariables: String = "", sdlEnabled: Bool = true, hidrawDisabled: Bool = false, ue4Hack: Bool = true, mvkArgBuff: Bool = true, vulkanLib: String = "latest", dxvk: String? = nil, wineEsync: String? = nil, d3dMEnableMetalFX: String? = nil, d3dMaxFPS: Double = 0, d3dSupportDXR: String? = nil, dlssFrameGenerationEnabled: Bool = false, externalQualitySettingsEnabled: Bool = false, closeLauncherWhenGameStarts: Bool = false) {
+    init(cxGraphicsBackend: String = "d3dmetal4", wineMSync: Bool = true, mtlHudEnabled: Bool = false, d3dMtl4Enabled: Bool = true, dx9PatchEnabled: Bool = false, gameArguments: String = "", dxmtPreferredMaxFrameRate: Double = 0, dxmtMetalFXSpatial: Bool = false, dxmtMetalSpatialUpscaleFactor: Double = 1.0, advertiseAVX: Bool = true, envVariables: String = "", sdlEnabled: Bool = true, hidrawDisabled: Bool = false, ue4Hack: Bool = true, mvkArgBuff: Bool = true, vulkanLib: String = "latest", dxvk: String? = nil, wineEsync: String? = nil, d3dMEnableMetalFX: String? = nil, d3dMaxFPS: Double = 0, d3dSupportDXR: String? = nil, dlssFrameGenerationEnabled: Bool = false, externalQualitySettingsEnabled: Bool = false, closeLauncherWhenGameStarts: Bool = false, jx3SkipLauncher: Bool = false) {
         self.cxGraphicsBackend = cxGraphicsBackend
         self.wineMSync = wineMSync
         self.mtlHudEnabled = mtlHudEnabled
         self.dlssFrameGenerationEnabled = dlssFrameGenerationEnabled
         self.externalQualitySettingsEnabled = externalQualitySettingsEnabled
         self.closeLauncherWhenGameStarts = closeLauncherWhenGameStarts
+        self.jx3SkipLauncher = jx3SkipLauncher
         self.dx9PatchEnabled = dx9PatchEnabled
         self.gameArguments = gameArguments
         self.dxmtMetalFXSpatial = dxmtMetalFXSpatial
@@ -260,6 +290,7 @@ class GameOptions: ObservableObject { // this is used as form state
             ?? defaults.externalQualitySettingsEnabled
         self.closeLauncherWhenGameStarts = data.closeLauncherWhenGameStarts
             ?? defaults.closeLauncherWhenGameStarts
+        self.jx3SkipLauncher = data.jx3SkipLauncher ?? defaults.jx3SkipLauncher
         self.dx9PatchEnabled = data.dx9PatchEnabled ?? defaults.dx9PatchEnabled
         self.gameArguments = data.gameArguments ?? defaults.gameArguments
         self.dxmtMetalFXSpatial = data.dxmtMetalFXSpatial ?? defaults.dxmtMetalFXSpatial
@@ -295,6 +326,7 @@ class GameOptions: ObservableObject { // this is used as form state
         if let value = data.closeLauncherWhenGameStarts {
             closeLauncherWhenGameStarts = value
         }
+        if let value = data.jx3SkipLauncher { jx3SkipLauncher = value }
         if let value = data.dx9PatchEnabled { dx9PatchEnabled = value }
         if let value = data.gameArguments { gameArguments = value }
         if let value = data.dxmtMetalFXSpatial { dxmtMetalFXSpatial = value }
@@ -826,6 +858,7 @@ class LibraryPageGlobals: ObservableObject {
     @Published var sortBy: SortingOptions = SortingOptions.name
     @Published var libraryFilter: LibraryFilter = .installed
     @Published var playingID: String?
+    @Published var shaderOptimizationRevision = 0
     @Published var jx3RuntimeActivity: JX3RuntimeActivity = .idle
     
     init(loadSavedLibrary: Bool = true) {
@@ -849,12 +882,13 @@ class LibraryPageGlobals: ObservableObject {
         if OnlineGameMode.isEnabled {
             return self.games.filter { !$0.isSteamTool }
         }
-        return (self.games + self.customAddedGames.map(resolvedCustomGame)).map { game in
+        let visible = (self.games + self.customAddedGames.map(resolvedCustomGame)).map { game in
             let adapted = GamePresentationProfiles.resolve(game)
             return presentations[game.id]?.apply(to: adapted) ?? adapted
         }.filter {
             !$0.isSteamTool && !unavailableLocalGameIDs.contains($0.id)
         }
+        return StandardLibraryJX3.removingDuplicateShortcuts(from: visible)
     }
 
     func refreshLocalProgramAvailability() {
@@ -943,6 +977,7 @@ class LibraryPageGlobals: ObservableObject {
     }
 
     private func saveLinkedSteamMetadata() {
+        guard !ArclumeResetCoordinator.shared.isActive else { return }
         let groupDefaults = UserDefaults(suiteName: suiteName)!
         guard let data = try? JSONEncoder().encode(linkedSteamMetadata) else { return }
         groupDefaults.set(data, forKey: Self.linkedSteamMetadataDefaultsKey)
@@ -994,6 +1029,7 @@ class LibraryPageGlobals: ObservableObject {
     }
     
     func saveCustomAddedGames() {
+        guard !ArclumeResetCoordinator.shared.isActive else { return }
         let groupDefaults = UserDefaults(suiteName: suiteName)!
         let encoder = JSONEncoder()
         guard let data = try? encoder.encode(self.customAddedGames) else { return }

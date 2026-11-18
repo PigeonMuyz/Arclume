@@ -77,6 +77,25 @@ struct DownloadableResourceTests {
         #expect(strategy.delivery == .precompiled)
         #expect(strategy.componentID == "io.arclume.runtime.wine")
         #expect(strategy.recipeID == nil)
+        #expect(!catalog.components.contains(where: { $0.id == "d3dmetal3" }))
+        let graphics = try #require(catalog.components.first(where: { $0.id == "d3dmetal4" }))
+        #expect(graphics.version == "4-beta3")
+        #expect(graphics.displayName == "D3DMetal 4 Beta 3")
+    }
+
+    @MainActor @Test func jx3ResourcesFollowItsSavedBackendWithoutChangingSteamRequirements() {
+        let store = DownloadableResourceStore(jx3GraphicsBackend: { "dxmt" })
+        store.selectedProvider = .arclume
+
+        #expect(store.requiredIDs(for: .jx3).contains("dxmt"))
+        #expect(!store.requiredIDs(for: .jx3).contains("d3dmetal4"))
+        #expect(store.requiredIDs(for: .steam).contains("d3dmetal4"))
+        #expect(!store.requiredIDs(for: .steam).contains("dxmt"))
+        #expect(!store.requiredIDs(for: .runtime).contains("dxmt"))
+
+        store.selectedProvider = .nefinita
+        #expect(store.requiredIDs(for: .jx3).contains("d3dmetal4"))
+        #expect(!store.requiredIDs(for: .jx3).contains("dxmt"))
     }
 
     @Test func resourceURLRequiresAnHTTPSBaseAndUsesTheComponentObjectKey() throws {

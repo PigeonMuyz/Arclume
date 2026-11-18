@@ -8,7 +8,7 @@ Nefinita 为暂定显示名称，对接 `nefinita/mac-gamestater` 的运行时�
 设置 / 初始化中的运行时选项：
 
 - 下载编译好的 Arclume Runtime：保留原下载、验证和安装链路。
-- 在本机编译 Nefinita：检查工具，确认后自动获取构建材料，再准备 Wine 源码、构建依赖、应用 FineWine 补丁、编译并安装。不要求用户选择源码目录。
+- 在本机编译 Nefinita：检查工具，确认后自动并发获取全部构建材料，全部就绪后再准备 Wine 源码、构建依赖、应用 FineWine 补丁、编译并安装。不要求用户选择源码目录。
 
 构建材料优先使用已配置的 OSS，网络获取失败时回退到 GitHub 固定提交的原始文件，而非克隆全部历史或执行最新分支代码。支持的 13 个输入文件及 SHA-256 位于 `nefinita-build-recipe.json`；最多并发下载 3 个文件，下载落盘后校验，再复制到独立工作目录并重新校验。有效缓存可直接复用。
 上游仍为私有仓库，匿名 GitHub 回退无法获取它们；应用使用 OSS 已发布的固定构建输入，不要求用户找源码目录，也不会使用开发者的 GitHub CLI 或凭据。未配置下载地址的开发包仍不能使用私有 GitHub 回退。
@@ -23,6 +23,16 @@ Nefinita 为暂定显示名称，对接 `nefinita/mac-gamestater` 的运行时�
 最多使用 4 个构建并发任务。构建输出写入 `RuntimeBuilds/Nefinita/<会话>/build.log`，不把大量输出载入内存。
 实际编译工作区位于无空格的物理缓存目录 `Library/Caches/Arclume/RuntimeBuilds/Nefinita/<会话>`；用户目录含空格或不受构建工具支持的字符时改用系统临时目录。日志第一行记录工作区，旧会话不搬迁。不能使用指向 `Application Support` 的软链接规避空格，因为构建工具可能再次解析物理路径。
 构建期间暂不支持中止当前阶段；关闭设置不会取消构建。编译失败保留该会话用于诊断，再次构建创建新会话。
+
+## 全量预取后编译
+
+认证配方准备完成后，先并发预取全部 23 份材料（Wine、21 个锁定依赖和 FineWine 固定快照），全部落盘并校验通过才启动任何构建阶段。最多三路传输，界面显示完成数量、已就绪字节和网络速度，不展示下载服务器地址。依赖编译仍按上游所需顺序进行，并非同时编译互相依赖的库。
+
+`nefinita-build-materials.json` 记录 22 个新增材料的原始归档、版本、SHA-256、大小和不可变对象键，运行时与认证的 `FREETYPE_SOURCE.lock`、`DEPENDENCIES.lock` 及 FineWine revision 交叉检查。Wine 沿用 `nefinita-wine-source.json`。FineWine 镜像发布前核对认证的逐补丁哈希，构建时原脚本再次核对所有补丁。
+
+对象结构：`components/source/<名称>/dev.nefinita.source.<名称>/<版本>/<SHA256>/<原始归档名>`。所有材料优先 OSS，每个地址最多尝试三次，传输失败后回退固定上游；哈希不符直接停止。共享缓存为 `Library/Caches/Arclume/BuildSources/<SHA256>/<归档名>`，兼容已有 Wine 缓存，完成项跨失败和会话复用，不移动旧构建工作区或用户数据。
+
+维护者使用 `python3 script/publish_nefinita_dependencies.py --source <认证配方缓存>` 并发准备归档、生成候选元数据；审核元数据后加 `--execute` 上传。只有维护者工具接受源码缓存参数，App 不要求用户选择目录。上传前执行 15 GiB 容量检查，复用排他锁，只增加缺失对象并验证鉴权和匿名 HTTPS 内容；不发布 App、不删除旧对象。回执位于 Git 忽略的 `build/resource-upload/nefinita-dependencies-upload-report.json`。工具和 App 都不把凭据或私有端点写入元数据。
 
 ## 共享容器与运行时切换
 
@@ -46,7 +56,7 @@ Nefinita 为暂定显示名称，对接 `nefinita/mac-gamestater` 的运行时�
 
 ### 固定构建配方
 
-维护者已批准发布该固定版本的 13 个构建输入，合计 57,662 字节；没有上传整个仓库、编译工具包、Wine 构建产物或 DMG。工具包和其他源码镜像仍需后续准备。
+维护者已批准发布该固定版本的 13 个构建输入，合计 57,662 字节；没有上传整个仓库、编译工具包、Wine 构建产物或 DMG。另已发布上述 22 份依赖与补丁归档（65,496,556 字节），Wine 源码沿用既有镜像；宿主编译工具包仍需后续准备。
 构建输入的准确对象路径为 `components/build-recipe/nefinita/dev.nefinita.build-recipe/<版本>-<提交前8位>/<文件SHA256>/<runtime内相对路径>`，例如相对路径 `script/build-runtime.sh`。下载根地址复用 App 的 `ArclumeResourceBaseURL`，界面不展示服务器地址。
 保留现有 `components/类型/名称/ID/版本/SHA256/文件名` 结构，工具需区分宿主架构；发布配方应包含全部源码版本、补丁、工具版本和哈希。
 不要把私有仓库改为匿名动态脚本入口，也不要把开发者的 Homebrew 整个目录复制给用户。

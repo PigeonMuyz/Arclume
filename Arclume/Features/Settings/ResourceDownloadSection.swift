@@ -7,7 +7,6 @@ struct ResourceDownloadSection: View {
     @State private var pendingIDs: Set<String> = []
     @State private var confirmsDownload = false
     @State private var confirmationIsPreparation = false
-    @State private var activationError: String?
 
     init(store: DownloadableResourceStore = .shared, showsAction: Bool = true,
          purpose: DownloadableResourceCatalog.Purpose = .runtime) {
@@ -44,15 +43,7 @@ struct ResourceDownloadSection: View {
                     confirmationIsPreparation = true
                     confirmsDownload = true
                 }.buttonStyle(.bordered)
-            } else if showsAction && store.selectedProvider != store.activeProvider {
-                Button("使用 \(store.selectedProvider.title)") {
-                    Task {
-                        do { try await store.activateSelection(); activationError = nil }
-                        catch { activationError = error.localizedDescription }
-                    }
-                }.buttonStyle(.bordered)
             }
-            if let activationError { Text(activationError).font(.footnote).foregroundStyle(.red) }
             if let error = store.error {
                 Text(error).font(.footnote).foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)

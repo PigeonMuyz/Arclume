@@ -65,4 +65,23 @@ final class ArclumeUITests: XCTestCase {
         XCTAssertFalse(app.menuItems["DXMT"].exists)
         app.typeKey(.escape, modifierFlags: [])
     }
+
+    func testRuntimeOptionsSaveWithoutButtons() throws {
+        launch("graphics")
+        let mSync = app.descendants(matching: .any)["game-options-msync"].firstMatch
+        XCTAssertTrue(mSync.waitForExistence(timeout: 5))
+        for label in ["保存设置", "重置", "Save settings", "Reset"] {
+            XCTAssertFalse(app.buttons[label].exists)
+        }
+
+        let originalValue = try String(describing: XCTUnwrap(mSync.value))
+        mSync.click()
+        let changedValue = try String(describing: XCTUnwrap(mSync.value))
+        XCTAssertNotEqual(changedValue, originalValue)
+
+        app.terminate()
+        launch("graphics")
+        XCTAssertTrue(mSync.waitForExistence(timeout: 5))
+        XCTAssertEqual(try String(describing: XCTUnwrap(mSync.value)), changedValue)
+    }
 }

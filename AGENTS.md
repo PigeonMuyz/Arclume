@@ -23,7 +23,7 @@
 - App 版本以 Xcode 项目中的 `MARKETING_VERSION` 和 `CURRENT_PROJECT_VERSION` 为唯一来源。
 - Runtime 版本、ABI、归档名和 SHA-256 以 `arclume-wine-runtime.json` 为唯一来源。
 - 发布工作流只接受 `release: <版本>`（必须与项目内部版本一致）或 `release: github actions`（读取项目版本）。
-- 发布会生成 `with-runtime` 与 `no-runtime` 两个 DMG；不应在普通 PR 中触发发布。
+- 发布生成单个不内置运行组件的 DMG 和对应 SHA-256 文件；不应在普通 PR 中触发发布。
 
 ## 验证与报告
 

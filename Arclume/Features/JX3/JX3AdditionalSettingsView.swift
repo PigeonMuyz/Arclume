@@ -8,14 +8,14 @@ import SwiftUI
 struct JX3AdditionalSettingsView: View {
     @ObservedObject var gameOptions: GameOptions
     let isRuntimeActive: Bool
-    let onSettingsChanged: () -> Void
+    let onSettingsChanged: ((inout GameOptionsData) -> Void) -> Void
 
     @EnvironmentObject private var appGlobals: AppGlobals
     @State private var isApplyingGPUProfile = false
 
     private var machineConfigURL: URL? {
         guard let bottle = OnlineGameMode.jx3BottleURL(appGlobals: appGlobals) else { return nil }
-        return JX3ConfigPresetImporter.configURL(in: bottle).deletingLastPathComponent()
+        return JX3GameConfiguration.configURL(in: bottle).deletingLastPathComponent()
             .appendingPathComponent("config", isDirectory: true)
             .appendingPathComponent("machine_config.ini")
     }
@@ -25,14 +25,23 @@ struct JX3AdditionalSettingsView: View {
             GroupBox("运行时与图形") {
                 VStack(alignment: .leading, spacing: 12) {
                     LabeledContent("运行时", value: "Arclume Wine")
-                    DropDown(
-                        options: OnlineGameMode.onlineGraphicsBackends,
-                        label: "图形后端",
-                        value: $gameOptions.cxGraphicsBackend
-                    )
-                    .onChange(of: gameOptions.cxGraphicsBackend) { _, backend in
-                        gameOptions.d3dMtl4Enabled = backend == "d3dmetal4"
-                        onSettingsChanged()
+                    if OnlineGameMode.supportsD3DMetal4 {
+                        DropDown(
+                            options: OnlineGameMode.onlineGraphicsBackends,
+                            label: "图形后端",
+                            value: $gameOptions.cxGraphicsBackend
+                        )
+                        .onChange(of: gameOptions.cxGraphicsBackend) { _, backend in
+                            gameOptions.d3dMtl4Enabled = backend == "d3dmetal4"
+                            onSettingsChanged {
+                                $0.cxGraphicsBackend = backend
+                                $0.d3dMtl4Enabled = backend == "d3dmetal4"
+                            }
+                        }
+                    } else {
+                        LabeledContent("图形后端", value: "D3DMetal 4 Beta 3 · 不可用")
+                        Text(OnlineGameMode.d3dMetal4RequirementMessage)
+                            .font(.caption).foregroundStyle(.secondary)
                     }
                     Toggle("MSync", isOn: $gameOptions.wineMSync)
                 }
@@ -65,13 +74,21 @@ struct JX3AdditionalSettingsView: View {
         .padding(.vertical)
         .controlSize(.regular)
         .toggleStyle(.switch)
-        .onChange(of: gameOptions.externalQualitySettingsEnabled) { _, _ in
-            onSettingsChanged()
+        .onChange(of: gameOptions.externalQualitySettingsEnabled) { _, value in
+            onSettingsChanged { $0.externalQualitySettingsEnabled = value }
         }
-        .onChange(of: gameOptions.wineMSync) { _, _ in onSettingsChanged() }
-        .onChange(of: gameOptions.closeLauncherWhenGameStarts) { _, _ in onSettingsChanged() }
-        .onChange(of: gameOptions.gameArguments) { _, _ in onSettingsChanged() }
-        .onChange(of: gameOptions.envVariables) { _, _ in onSettingsChanged() }
+        .onChange(of: gameOptions.wineMSync) { _, value in
+            onSettingsChanged { $0.wineMSync = value }
+        }
+        .onChange(of: gameOptions.closeLauncherWhenGameStarts) { _, value in
+            onSettingsChanged { $0.closeLauncherWhenGameStarts = value }
+        }
+        .onChange(of: gameOptions.gameArguments) { _, value in
+            onSettingsChanged { $0.gameArguments = value }
+        }
+        .onChange(of: gameOptions.envVariables) { _, value in
+            onSettingsChanged { $0.envVariables = value }
+        }
     }
 
     private var runtimeSelection: Binding<String> {
@@ -104,6 +121,6 @@ struct JX3AdditionalSettingsView: View {
     JX3AdditionalSettingsView(
         gameOptions: GameOptions(),
         isRuntimeActive: false
-    ) {}
+    ) { _ in }
     .environmentObject(AppGlobals())
 }

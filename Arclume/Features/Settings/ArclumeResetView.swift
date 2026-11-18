@@ -20,12 +20,11 @@ struct ArclumeResetView: View {
         .sheet(isPresented: $showConfirmation, onDismiss: {
             guard resetAfterDismiss else { return }
             resetAfterDismiss = false
-            ArclumeResetService.requested = true
-            NSApp.terminate(nil)
+            ArclumeResetCoordinator.shared.start()
         }) {
             VStack(alignment: .leading, spacing: 16) {
                 Text("确认重置设置与应用数据？").font(.title2)
-                Text("请先保存所有 Windows 程序的工作，并停止安装、下载或更新。确认后会结束 Arclume Wine 进程并退出；下次打开时先清理，再重新初始化。")
+                Text("请先保存所有 Windows 程序的工作。确认后会检查后台任务、结束 Arclume Wine 进程，并显示重置进度；完成后由你确认退出。")
                 Text("Arclume 容器内的游戏、程序、存档与登录数据将随整个目录移到废纸篓；应用设置将清除。旧版本设置不会再次导入。")
                     .foregroundStyle(.orange)
                 Text(ARCLUME_SUPPORT_FOLDER_URL.path).font(.caption).textSelection(.enabled)

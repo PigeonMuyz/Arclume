@@ -51,7 +51,7 @@ nonisolated struct ManagedWineContainerRepository: @unchecked Sendable {
     }
 
     private var defaultContainer: ManagedWineContainer {
-        .init(id: ManagedWineContainer.defaultID, name: "默认容器", provider: .selected(in: defaults))
+        .init(id: ManagedWineContainer.defaultID, name: "默认容器", provider: .sharedPrefixProvider(in: defaults))
     }
 
     @discardableResult

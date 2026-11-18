@@ -19,11 +19,9 @@ final class ArclumeAppDelegate: NSObject, NSApplicationDelegate {
                 WineWarmupService.shared.beginQuitting()
             },
             stopWine: {
-                let root = BundledWineRuntime.installationURL.deletingLastPathComponent()
-                try await ArclumeWineStopService.stop(runtimeRoot: root)
+                try await ArclumeWineStopService.stopManagedRuntimes()
             },
             cancelExit: {
-                ArclumeResetService.requested = false
                 ArclumeWineStopService.cancelApplicationExit()
                 WineWarmupService.shared.cancelQuitting()
             },
@@ -33,8 +31,7 @@ final class ArclumeAppDelegate: NSObject, NSApplicationDelegate {
                 alert.informativeText = error.localizedDescription + "\n请稍后再次退出 Arclume。已经结束的 Windows 应用不会自动恢复。"
                 alert.addButton(withTitle: "好")
                 alert.runModal()
-            },
-            finishExit: { try ArclumeResetService.commitIfRequested() }
+            }
         )
     }
 
@@ -51,9 +48,11 @@ final class ArclumeAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !ArclumeTestEnvironment.isTesting else { return .terminateNow }
+        let reset = ArclumeResetCoordinator.shared
+        if reset.blocksQuit { return .terminateCancel }
+        if reset.phase == .completed && reset.allowsExit { return .terminateNow }
         if terminationReady { return .terminateNow }
         if UnifiedContainerMigrationModel.shared.busy {
-            ArclumeResetService.requested = false
             let alert = NSAlert()
             alert.messageText = "容器迁移正在进行"
             alert.informativeText = "请等待校验或恢复完成后再退出，避免中断容器切换。"

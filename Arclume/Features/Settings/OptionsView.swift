@@ -712,6 +712,7 @@ struct OptionsView: View {
 
     private func prepareBundledSteamPrefix(installSteam: Bool = false) {
         guard !preparingBundledSteamPrefix, !containerSteamStore.steamSetupBusy else { return }
+        let resetActivity = ArclumeResetCoordinator.beginActivity()
         preparingBundledSteamPrefix = true
         bundledSteamProgress = 0.01
         bundledSteamProgressLabel = "正在检查内置 Wine…"
@@ -723,6 +724,7 @@ struct OptionsView: View {
             }
         }
         Task {
+            defer { ArclumeResetCoordinator.endActivity(resetActivity) }
             do {
                 try await resourceStore.download(purpose: .steam)
                 let prefixURL = try await Task.detached(priority: .userInitiated) {

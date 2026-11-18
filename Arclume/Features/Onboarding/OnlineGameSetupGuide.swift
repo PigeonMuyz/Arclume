@@ -178,9 +178,10 @@ struct OnlineGameRuntimeUpdateView: View {
         Task { @MainActor in
             do {
                 try await resourceStore.download(purpose: .jx3)
+                let graphicsBackend = resourceStore.graphicsBackend(for: .jx3)
                 let bottleURL = try await Task.detached(priority: .userInitiated) {
                     let bottleURL = try BundledWineRuntime.preparePrefix(
-                        progress: reportProgress
+                        progress: reportProgress, graphicsBackend: graphicsBackend
                     )
                     reportProgress(0.97, "正在核对 Games 容器配置…")
                     try OnlineGameBottleConfiguration.apply(to: bottleURL)
@@ -721,9 +722,10 @@ struct OnlineGameSetupGuide: View {
         Task { @MainActor in
             do {
                 try await resourceStore.download(purpose: .jx3)
+                let graphicsBackend = resourceStore.graphicsBackend(for: .jx3)
                 let bottleURL = try await Task.detached(priority: .userInitiated) {
                     let bottleURL = try BundledWineRuntime.preparePrefix(
-                        progress: reportProgress
+                        progress: reportProgress, graphicsBackend: graphicsBackend
                     )
                     reportProgress(0.97, "正在写入中文环境和字体回退…")
                     try OnlineGameBottleConfiguration.apply(to: bottleURL)
@@ -877,7 +879,9 @@ struct OnlineGameSetupGuide: View {
                 from: sourceURL,
                 into: bottleURL
             )
-            OnlineGameInitialConfiguration.startPolling(for: bottleURL)
+            OnlineGameInitialConfiguration.startPolling(
+                for: bottleURL, installation: OnlineGameInstallation(clientURL: nil, launcherURL: launcherURL)
+            )
             completeLauncherSetup(message: "已安装 \(launcherURL.lastPathComponent)")
         } catch {
             isBusy = false
@@ -920,11 +924,12 @@ struct OnlineGameSetupGuide: View {
                 return
             }
 
-            if OnlineGameDiscovery.jx3Installation(in: bottleURL).isDetected {
+            let installation = OnlineGameDiscovery.jx3Installation(in: bottleURL)
+            if installation.isDetected {
                 isWatchingManualImport = false
                 do {
                     try OnlineGameBottleConfiguration.apply(to: bottleURL)
-                    OnlineGameInitialConfiguration.startPolling(for: bottleURL)
+                    OnlineGameInitialConfiguration.startPolling(for: bottleURL, installation: installation)
                     completeLauncherSetup(message: "已在 drive_c 中发现并识别 SeasunGame.exe")
                 } catch {
                     errorMessage = error.localizedDescription
@@ -979,7 +984,9 @@ struct OnlineGameSetupGuide: View {
                 from: sourceURL,
                 into: bottleURL
             )
-            OnlineGameInitialConfiguration.startPolling(for: bottleURL)
+            OnlineGameInitialConfiguration.startPolling(
+                for: bottleURL, installation: OnlineGameInstallation(clientURL: nil, launcherURL: launcherURL)
+            )
             completeLauncherSetup(
                 message: "已从下载文件夹导入 \(launcherURL.lastPathComponent)"
             )

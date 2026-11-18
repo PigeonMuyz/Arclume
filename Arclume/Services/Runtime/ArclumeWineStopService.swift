@@ -88,6 +88,20 @@ nonisolated enum ArclumeWineStopService {
     }
 
     static func stop(runtimeRoot: URL, prefix: URL? = nil) async throws {
+        let root = canonicalPath(runtimeRoot.path)
+        try await stop { try snapshot(root: root, prefix: prefix) }
+    }
+
+    static func managedRuntimeSnapshot() throws -> [Identity] {
+        let bundledRoot = BundledWineRuntime.installationURL.deletingLastPathComponent()
+        return try snapshot(root: canonicalPath(bundledRoot.path))
+    }
+
+    static func stopManagedRuntimes() async throws {
+        try await stop(snapshot: managedRuntimeSnapshot)
+    }
+
+    private static func stop(snapshot: @Sendable () throws -> [Identity]) async throws {
         // A global Stop action may arrive while a Steam-only recovery is
         // draining. Wait for it, then run the full requested scope as well.
         let deadline = ContinuousClock.now.advanced(by: .seconds(20))
@@ -100,9 +114,8 @@ nonisolated enum ArclumeWineStopService {
             }
         }
         defer { endStopping() }
-        let root = runtimeRoot.resolvingSymlinksInPath().standardizedFileURL.path
         try await drain(
-            snapshot: { try snapshot(root: root, prefix: prefix) },
+            snapshot: snapshot,
             signal: { identity, signal in
                 // PID reuse must never turn into a signal to an unrelated process.
                 guard readIdentity(identity.pid) == identity else { return }
@@ -146,7 +159,7 @@ nonisolated enum ArclumeWineStopService {
         executable.hasPrefix(root + "/")
     }
 
-    static func snapshot(root: String, prefix: URL? = nil) throws -> [Identity] {
+    static func snapshot(root: String, prefix: URL? = nil, requireReadablePrefix: Bool = true) throws -> [Identity] {
         var capacity = max(Int(proc_listallpids(nil, 0)) + 128, 256)
         for _ in 0..<4 {
             var pids = [Int32](repeating: 0, count: capacity)
@@ -166,7 +179,7 @@ nonisolated enum ArclumeWineStopService {
                 guard readIdentity(identity.pid) == identity else { return false }
                 if let prefix {
                     guard let processPrefix = winePrefix(pid: identity.pid), !processPrefix.isEmpty else {
-                        if readIdentity(identity.pid) == identity { throw StopError.enumerationFailed }
+                        if requireReadablePrefix && readIdentity(identity.pid) == identity { throw StopError.enumerationFailed }
                         return false
                     }
                     guard canonicalPath(processPrefix) == canonicalPath(prefix.path) else { return false }
@@ -179,6 +192,33 @@ nonisolated enum ArclumeWineStopService {
 
     static func canonicalPath(_ path: String) -> String {
         URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    /// Reset checks only Arclume engines or processes explicitly using managed data.
+    /// Other CrossOver/Wine installations are never killed or rejected by name alone.
+    static func requireManagedDataIdle(root: URL) throws {
+        let path = canonicalPath(root.path)
+        guard try snapshot(root: path).isEmpty else { throw ResourceDownloadError.busyRuntime }
+        var capacity = max(Int(proc_listallpids(nil, 0)) + 128, 256)
+        for _ in 0..<4 {
+            var pids = [Int32](repeating: 0, count: capacity)
+            let count = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
+            guard count > 0 else { throw StopError.enumerationFailed }
+            if count >= capacity { capacity *= 2; continue }
+            for pid in pids.prefix(Int(count)) {
+                guard let identity = readIdentity(pid), let prefix = winePrefix(pid: pid),
+                      readIdentity(pid) == identity else { continue }
+                guard !usesManagedData(prefix: prefix, root: path) else { throw ResourceDownloadError.busyRuntime }
+            }
+            return
+        }
+        throw StopError.enumerationFailed
+    }
+
+    static func usesManagedData(prefix: String, root: String) -> Bool {
+        let path = canonicalPath(prefix)
+        let managed = canonicalPath(root)
+        return path == managed || path.hasPrefix(managed + "/")
     }
 
     /// A renamed temporary loader is owned only if its mapped ntdll comes from

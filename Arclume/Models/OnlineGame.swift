@@ -11,13 +11,15 @@ enum OnlineGameMode {
     nonisolated static let jx3ClientName = "JX3ClientX64.exe"
     nonisolated static let jx3LauncherName = "SeasunGame.exe"
     static let defaultBottleName = "Games"
-    static let jx3GameDirectoryComponents = [
+    nonisolated static let jx3GameDirectoryComponents = [
         "drive_c", "SeasunGame", "Game", "JX3", "bin", "zhcn_hd"
     ]
     private static let allOnlineGraphicsBackends: DropdownOptions = [
-        (id: "d3dmetal3", label: "D3DMetal 3"),
-        (id: "d3dmetal4", label: "D3DMetal 4 Beta 2")
+        (id: "d3dmetal4", label: "D3DMetal 4 Beta 3"),
+        (id: "dxmt", label: "DXMT 0.80")
     ]
+    nonisolated static let d3dMetal4RequirementMessage =
+        "D3DMetal 4 Beta 3 需要 macOS 26 和支持 Metal 4 的 GPU，当前 Mac 无法使用。"
 
     /// D3DMetal 4 requires the Metal 4 GPU family. Checking the actual
     /// default device is more reliable than inferring support from the Mac
@@ -44,28 +46,20 @@ enum OnlineGameMode {
     ) -> DropdownOptions {
         supportingD3DMetal4
             ? allOnlineGraphicsBackends
-            : allOnlineGraphicsBackends.filter { $0.id != "d3dmetal4" }
+            : allOnlineGraphicsBackends.filter { $0.id == "dxmt" }
     }
 
     nonisolated static func defaultGraphicsBackend(
         supportingD3DMetal4: Bool
     ) -> String {
-        supportingD3DMetal4 ? "d3dmetal4" : "d3dmetal3"
+        "d3dmetal4"
     }
 
     nonisolated static func resolvedGraphicsBackend(
         _ requestedBackend: String,
         supportingD3DMetal4: Bool
     ) -> String {
-        let availableBackends = graphicsBackends(
-            supportingD3DMetal4: supportingD3DMetal4
-        )
-        guard availableBackends.contains(where: { $0.id == requestedBackend }) else {
-            return defaultGraphicsBackend(
-                supportingD3DMetal4: supportingD3DMetal4
-            )
-        }
-        return requestedBackend
+        requestedBackend == "dxmt" ? "dxmt" : "d3dmetal4"
     }
 
     static var isEnabled: Bool {
@@ -91,9 +85,7 @@ enum OnlineGameMode {
             supportingD3DMetal4: supportsD3DMetal4
         )
         options.cxGraphicsBackend = resolvedBackend
-        // The same persisted choice is consumed by CrossOver and standalone
-        // Wine 11. Wine 11 resolves the selected D3DMetal version inside its
-        // own runtime instead of injecting CrossOver files into the bottle.
+        // Both launch routes consume the same persisted graphics choice.
         options.d3dMtl4Enabled = resolvedBackend == "d3dmetal4"
     }
 
@@ -122,12 +114,10 @@ nonisolated struct OnlineGameInstallation: Sendable {
         self.workingDirectoryURL = workingDirectoryURL
     }
 
-    /// A client executable alone is not a supported installation: the game
-    /// must be entered through SeasunGame.exe.
+    /// Automatic discovery continues to require the normal launcher.
     var isDetected: Bool { launcherURL != nil }
 
-    /// Keep login, patching, region selection, and anti-cheat setup inside the
-    /// launcher's normal flow instead of bypassing it with the client EXE.
+    /// The default entry point retains the launcher's login and update flow.
     var preferredLaunchURL: URL? { launcherURL }
 
     /// The launcher executable is installed one level above the versioned
@@ -144,6 +134,35 @@ nonisolated struct OnlineGameInstallation: Sendable {
     var preferredProcessNames: [String] {
         preferredLaunchURL.map { [$0.lastPathComponent] } ?? []
     }
+
+    struct LaunchTarget: Sendable {
+        let executableURL: URL
+        let arguments: [String]
+        let workingDirectoryURL: URL?
+    }
+
+    // Zeratulag-'s documented client CLI (2024-02-07):
+    // https://www.sina.cn/news/detail/4998898374149137.html
+    static let directClientArgument = "DOTNOTSTARTGAMEBYJX3CLIENT.EXE"
+
+    func launchTarget(skipLauncher: Bool, clientArguments: [String] = []) -> LaunchTarget? {
+        if skipLauncher {
+            guard let clientURL else { return nil }
+            return LaunchTarget(
+                executableURL: clientURL,
+                arguments: [Self.directClientArgument] + clientArguments.filter {
+                    $0.caseInsensitiveCompare(Self.directClientArgument) != .orderedSame
+                },
+                workingDirectoryURL: clientURL.deletingLastPathComponent()
+            )
+        }
+        guard let preferredLaunchURL else { return nil }
+        return LaunchTarget(
+            executableURL: preferredLaunchURL,
+            arguments: preferredLaunchArguments,
+            workingDirectoryURL: preferredWorkingDirectory
+        )
+    }
 }
 
 enum OnlineGameDiscovery {
@@ -154,16 +173,44 @@ enum OnlineGameDiscovery {
         return URL(fileURLWithPath: trimmed)
     }
 
-    static func jx3GameDirectory(in bottleURL: URL) -> URL? {
-        let expectedURL = OnlineGameMode.jx3GameDirectoryComponents.reduce(bottleURL) {
+    nonisolated static func defaultJX3GameDirectory(in bottleURL: URL) -> URL {
+        OnlineGameMode.jx3GameDirectoryComponents.reduce(bottleURL) {
             $0.appendingPathComponent($1, isDirectory: true)
         }
+    }
+
+    nonisolated static func jx3GameDirectory(
+        in bottleURL: URL,
+        installation: OnlineGameInstallation? = nil
+    ) -> URL? {
+        if let installation, let directory = discoveredJX3GameDirectory(in: installation) {
+            return directory
+        }
+
+        let expectedURL = defaultJX3GameDirectory(in: bottleURL)
         if (try? expectedURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
             return expectedURL
         }
 
-        let clientURL = jx3Installation(in: bottleURL).clientURL
-        return clientURL?.deletingLastPathComponent()
+        guard installation == nil else { return nil }
+        return discoveredJX3GameDirectory(in: jx3Installation(in: bottleURL))
+    }
+
+    nonisolated private static func discoveredJX3GameDirectory(in installation: OnlineGameInstallation) -> URL? {
+        if let binaryDirectory = installation.clientURL?.deletingLastPathComponent() {
+            let clientDirectory = binaryDirectory.lastPathComponent.caseInsensitiveCompare("bin64") == .orderedSame
+                ? binaryDirectory.deletingLastPathComponent() : binaryDirectory
+            if (try? clientDirectory.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                return clientDirectory
+            }
+        }
+        guard let launcherURL = installation.launcherURL else { return nil }
+        let launcherRelativeURL = OnlineGameMode.jx3GameDirectoryComponents.dropFirst(2)
+            .reduce(launcherURL.deletingLastPathComponent()) {
+                $0.appendingPathComponent($1, isDirectory: true)
+            }
+        return (try? launcherRelativeURL.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+            ? launcherRelativeURL : nil
     }
 
     /// The JX3 client keeps its runtime DLLs in the sibling `bin64` folder,

@@ -440,7 +440,6 @@ struct JX3LauncherHomeView: View {
             if feed == nil { feed = JX3LauncherFeedStore.cachedFeed() }
             if showsCloseButton || embeddedDetail || !compactHomeEnabled { await refreshFeed() }
         }
-        .onDisappear { persistJX3Options() }
         .onChange(of: feed?.carousel.map(\.id)) { _, carouselIDs in
             guard let selectedCarouselID else { return }
             guard carouselIDs?.contains(selectedCarouselID) != true else { return }
@@ -1007,8 +1006,8 @@ struct JX3LauncherHomeView: View {
                     JX3AdditionalSettingsView(
                         gameOptions: gameOptions,
                         isRuntimeActive: isPlaying || isLaunching
-                    ) {
-                        persistJX3Options()
+                    ) { update in
+                        GameOptionsPersistence.update(key: gameOptionsKey, update: update)
                     }
                 }
             }
@@ -1053,7 +1052,6 @@ struct JX3LauncherHomeView: View {
                     if hasConfirmedJX3Runtime {
                         onStop?()
                     } else if !isStartingJX3Runtime {
-                        persistJX3Options()
                         onLaunch()
                     }
                 } label: {
@@ -1132,16 +1130,27 @@ struct JX3LauncherHomeView: View {
             ? AnyLayout(HStackLayout(alignment: .center, spacing: 24))
             : AnyLayout(VStackLayout(alignment: .leading, spacing: 14))
         return layout {
-            runtimeToggle(L10n.string("Metal HUD"), isOn: $gameOptions.mtlHudEnabled)
+            runtimeToggle(L10n.string("Metal HUD"), isOn: savedToggle(\.mtlHudEnabled, \.mtlHudEnabled))
                 .help(L10n.string("Show frame rate and GPU performance metrics."))
-            runtimeToggle(L10n.string("DLSS Frame Generation (Beta)"), isOn: $gameOptions.dlssFrameGenerationEnabled)
+            runtimeToggle(L10n.string("DLSS Frame Generation (Beta)"), isOn: savedToggle(\.dlssFrameGenerationEnabled, \.dlssFrameGenerationEnabled))
                 .help(L10n.string("Expose DLSS frame generation support; enable it separately in the game's graphics settings."))
         }
         .font(.subheadline)
         .controlSize(.small)
         .toggleStyle(.switch)
-        .onChange(of: gameOptions.mtlHudEnabled) { _, _ in persistJX3Options() }
-        .onChange(of: gameOptions.dlssFrameGenerationEnabled) { _, _ in persistJX3Options() }
+    }
+
+    private func savedToggle(
+        _ field: ReferenceWritableKeyPath<GameOptions, Bool>,
+        _ storedField: WritableKeyPath<GameOptionsData, Bool?>
+    ) -> Binding<Bool> {
+        Binding(
+            get: { gameOptions[keyPath: field] },
+            set: { enabled in
+                gameOptions[keyPath: field] = enabled
+                GameOptionsPersistence.update(key: gameOptionsKey) { $0[keyPath: storedField] = enabled }
+            }
+        )
     }
 
     private func runtimeToggle(_ title: String, isOn: Binding<Bool>) -> some View {
@@ -1256,8 +1265,4 @@ struct JX3LauncherHomeView: View {
         didLoadOptions = true
     }
 
-    private func persistJX3Options() {
-        guard didLoadOptions else { return }
-        persistUsrDefData(key: gameOptionsKey, data: GameOptionsData(data: gameOptions))
-    }
 }

@@ -14,31 +14,53 @@ struct OnlineGameTests {
         #expect(OnlineGameMode.defaultBottleName == "Games")
     }
 
-    @Test func onlineGameOptionsChooseD3DMetal4OnlyWhenTheSystemSupportsMetal4() {
+    @Test func onlineGameOptionsExposeDXMTAlongsideAvailableD3DMetal() {
         #expect(
             OnlineGameMode.graphicsBackends(supportingD3DMetal4: true).map(\.id)
-                == ["d3dmetal3", "d3dmetal4"]
+                == ["d3dmetal4", "dxmt"]
         )
         #expect(
             OnlineGameMode.graphicsBackends(supportingD3DMetal4: false).map(\.id)
-                == ["d3dmetal3"]
+                == ["dxmt"]
         )
         #expect(OnlineGameMode.defaultGraphicsBackend(supportingD3DMetal4: true) == "d3dmetal4")
-        #expect(OnlineGameMode.defaultGraphicsBackend(supportingD3DMetal4: false) == "d3dmetal3")
-        #expect(
-            OnlineGameMode.resolvedGraphicsBackend(
-                "d3dmetal4",
-                supportingD3DMetal4: false
-            ) == "d3dmetal3"
-        )
-        #expect(
-            OnlineGameMode.resolvedGraphicsBackend(
-                "d3dmetal3",
-                supportingD3DMetal4: false
-            ) == "d3dmetal3"
-        )
+        #expect(OnlineGameMode.defaultGraphicsBackend(supportingD3DMetal4: false) == "d3dmetal4")
+        #expect(OnlineGameMode.graphicsBackends(supportingD3DMetal4: true).first?.label == "D3DMetal 4 Beta 3")
         #expect(GameOptions().wineMSync)
         #expect(!GameOptions().dlssFrameGenerationEnabled)
+    }
+
+    @Test(arguments: ["d3dmetal3", "d3dmetal", "d3dmetal4", "unknown"])
+    func savedGraphicsBackendMigratesToD3DMetal4(_ savedBackend: String) {
+        #expect(
+            OnlineGameMode.resolvedGraphicsBackend(
+                savedBackend,
+                supportingD3DMetal4: true
+            ) == "d3dmetal4"
+        )
+        #expect(
+            OnlineGameMode.resolvedGraphicsBackend(
+                savedBackend,
+                supportingD3DMetal4: false
+            ) == "d3dmetal4"
+        )
+
+        let options = GameOptions(cxGraphicsBackend: savedBackend, d3dMtl4Enabled: false)
+        OnlineGameMode.applyDefaultRuntimePreferences(to: options)
+        #expect(options.cxGraphicsBackend == "d3dmetal4")
+        #expect(options.d3dMtl4Enabled)
+    }
+
+    @Test @MainActor func explicitDXMTChoiceSurvivesDefaultPreferenceApplication() throws {
+        let saved = try JSONDecoder().decode(GameOptionsData.self, from: Data(#"{"cxGraphicsBackend":"dxmt","d3dMtl4Enabled":true}"#.utf8))
+        let options = GameOptions()
+        options.set(data: saved)
+        OnlineGameMode.applyDefaultRuntimePreferences(to: options)
+        #expect(options.cxGraphicsBackend == "dxmt")
+        #expect(!options.d3dMtl4Enabled)
+        let roundTrip = try JSONDecoder().decode(GameOptionsData.self, from: JSONEncoder().encode(GameOptionsData(data: options)))
+        #expect(roundTrip.cxGraphicsBackend == "dxmt")
+        #expect(OnlineGameMode.resolvedGraphicsBackend("dxmt", supportingD3DMetal4: false) == "dxmt")
     }
 
     @Test func savedDLSSFrameGenerationPreferenceIsRestored() throws {
@@ -279,6 +301,28 @@ struct OnlineGameTests {
         #expect(importedLauncher.standardizedFileURL == launcher.standardizedFileURL)
     }
 
+    @Test func welcomeImportDoesNotReplaceExistingGameData() throws {
+        let workspace = try temporaryBottle()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+        let bottle = workspace.appendingPathComponent("Bottle")
+        let destination = bottle.appendingPathComponent("drive_c/SeasunGame")
+        let source = workspace.appendingPathComponent("Source")
+        for directory in [destination, source] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data("launcher".utf8).write(to: directory.appendingPathComponent("SeasunGame.exe"))
+        }
+        #expect(throws: (any Error).self) {
+            try OnlineLauncherImporter.installPreservingExisting(from: source, into: bottle)
+        }
+        #expect(FileManager.default.fileExists(atPath: source.appendingPathComponent("SeasunGame.exe").path))
+        #expect(FileManager.default.fileExists(atPath: destination.appendingPathComponent("SeasunGame.exe").path))
+        let detected = try OnlineLauncherImporter.installPreservingExisting(from: destination, into: bottle)
+        #expect(detected.lastPathComponent == "SeasunGame.exe")
+        #expect(throws: (any Error).self) {
+            try OnlineLauncherImporter.installPreservingExisting(from: bottle, into: bottle)
+        }
+    }
+
     @Test func folderImportInstallsLauncherInManagedBottleAndCreatesCard() throws {
         let workspace = try temporaryBottle()
         defer { try? FileManager.default.removeItem(at: workspace) }
@@ -301,7 +345,7 @@ struct OnlineGameTests {
             encoding: .utf8
         )
 
-        let installedLauncher = try OnlineLauncherImporter.installLauncher(
+        let installedLauncher = try OnlineLauncherImporter.installPreservingExisting(
             from: launcherFolder,
             into: bottle
         )
@@ -557,134 +601,91 @@ struct OnlineGameTests {
         #expect(!FileManager.default.fileExists(atPath: missingConfig.path))
     }
 
-    @Test func importingJX3ConfigPresetReplacesCurrentFileAndRepairsSkipVideo() throws {
-        let workspace = try temporaryBottle()
-        defer { try? FileManager.default.removeItem(at: workspace) }
-
-        let bottle = workspace.appendingPathComponent("Games", isDirectory: true)
-        let gameRoot = bottle.appendingPathComponent(
-            "drive_c/SeasunGame/Game/JX3/bin/zhcn_hd",
-            isDirectory: true
-        )
+    @Test func skipVideoPatchPreservesGB18030AndMixedLineEndings() throws {
+        let bottle = try temporaryBottle()
+        defer { try? FileManager.default.removeItem(at: bottle) }
+        let gameRoot = OnlineGameDiscovery.defaultJX3GameDirectory(in: bottle)
         try FileManager.default.createDirectory(at: gameRoot, withIntermediateDirectories: true)
-
-        let source = workspace.appendingPathComponent("normal.ini")
-        let sourceContents = "[Main]\r\nCanvasWidth=2872\r\n\r\n[KG3DENGINE]\r\nAAOPTION_DLSSOption=1\r\n"
-        try sourceContents.write(to: source, atomically: true, encoding: .utf8)
-
-        let target = JX3ConfigPresetImporter.configURL(in: bottle)
-        let oldContents = "[Main]\nCanvasWidth=1280\n\n[Debug]\nOld=keep\n"
-        try oldContents.write(to: target, atomically: true, encoding: .utf8)
-
-        let result = try JX3ConfigPresetImporter.importPreset(
-            from: source,
-            into: bottle
-        )
-        let imported = try String(contentsOf: target, encoding: .utf8)
-
-        #expect(imported.contains("CanvasWidth=2872"))
-        #expect(imported.contains("AAOPTION_DLSSOption=1"))
-        #expect(imported.contains("SkipVideoCardScoreUpdate=1"))
-        #expect(result.configURL == target)
-        #expect(try String(contentsOf: source, encoding: .utf8) == sourceContents)
-        let gameDirectoryFiles = try FileManager.default.contentsOfDirectory(
-            at: gameRoot,
-            includingPropertiesForKeys: nil
-        )
-        #expect(gameDirectoryFiles.map(\.lastPathComponent) == ["config.ini"])
-    }
-
-    @Test func importingGBKJX3ConfigPresetNormalizesToUTF8() throws {
-        let workspace = try temporaryBottle()
-        defer { try? FileManager.default.removeItem(at: workspace) }
-
-        let bottle = workspace.appendingPathComponent("Games", isDirectory: true)
-        let gameRoot = bottle.appendingPathComponent(
-            "drive_c/SeasunGame/Game/JX3/bin/zhcn_hd",
-            isDirectory: true
-        )
-        try FileManager.default.createDirectory(at: gameRoot, withIntermediateDirectories: true)
-
-        let gb18030Encoding = String.Encoding(
+        let config = gameRoot.appendingPathComponent("config.ini")
+        let encoding = String.Encoding(
             rawValue: CFStringConvertEncodingToNSStringEncoding(
                 CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)
             )
         )
-        let source = workspace.appendingPathComponent("external-gb18030-preset.ini")
-        let sourceContents = "[Main]\r\nPresetName=简约\r\n\r\n[KG3DENGINE]\r\nQuality=2\r\n"
-        try #require(sourceContents.data(using: gb18030Encoding)).write(to: source)
+        let original = "[Main]\r\nName=简约\n\n[Debug]\r\n  SkipVideoCardScoreUpdate = 0  \nOther=keep"
+        let expected = original.replacingOccurrences(of: " = 0 ", with: " = 1 ")
+        let expectedData = try #require(expected.data(using: encoding))
+        try #require(original.data(using: encoding)).write(to: config)
 
-        let target = JX3ConfigPresetImporter.configURL(in: bottle)
-        try "[Main]\nOld=1\n\n[KG3DENGINE]\nQuality=3\n".write(
-            to: target,
-            atomically: true,
-            encoding: .utf8
-        )
-
-        _ = try JX3ConfigPresetImporter.importPreset(
-            from: source,
-            into: bottle
-        )
-        let importedData = try Data(contentsOf: target)
-        let imported = try #require(String(data: importedData, encoding: .utf8))
-
-        #expect(imported.contains("PresetName=简约"))
-        #expect(imported.contains("Quality=2"))
-        #expect(imported.contains("SkipVideoCardScoreUpdate=1"))
+        #expect(try OnlineGameInitialConfiguration.applySkipVideoCardScoreUpdate(in: bottle))
+        #expect(try Data(contentsOf: config) == expectedData)
     }
 
-    @Test func importingIncompleteJX3ConfigPresetIsRejectedBeforeChangingTarget() throws {
-        let workspace = try temporaryBottle()
-        defer { try? FileManager.default.removeItem(at: workspace) }
-
-        let bottle = workspace.appendingPathComponent("Games", isDirectory: true)
-        let gameRoot = bottle.appendingPathComponent(
-            "drive_c/SeasunGame/Game/JX3/bin/zhcn_hd",
-            isDirectory: true
-        )
-        try FileManager.default.createDirectory(at: gameRoot, withIntermediateDirectories: true)
-
-        let source = workspace.appendingPathComponent("not-jx3.ini")
-        try "[Main]\nOnly=1\n".write(to: source, atomically: true, encoding: .utf8)
-        let target = JX3ConfigPresetImporter.configURL(in: bottle)
-        let oldContents = "[Main]\nOld=1\n"
-        try oldContents.write(to: target, atomically: true, encoding: .utf8)
-
-        #expect(throws: JX3ConfigPresetError.invalidPreset) {
-            try JX3ConfigPresetImporter.importPreset(
-                from: source,
-                into: bottle
-            )
-        }
-        #expect(try String(contentsOf: target, encoding: .utf8) == oldContents)
-    }
-
-    @Test func configurationPollingRepairsSkipVideoAfterFileReappears() async throws {
+    @Test func skipVideoPatchPreservesBOMAndAddsKeyBeforeNextSection() throws {
         let bottle = try temporaryBottle()
         defer { try? FileManager.default.removeItem(at: bottle) }
-        let config = bottle.appendingPathComponent(
-            "drive_c/SeasunGame/Game/JX3/bin/zhcn_hd/config.ini"
+        let gameRoot = OnlineGameDiscovery.defaultJX3GameDirectory(in: bottle)
+        try FileManager.default.createDirectory(at: gameRoot, withIntermediateDirectories: true)
+        let config = gameRoot.appendingPathComponent("config.ini")
+        let bom = Data([0xFF, 0xFE])
+        let original = "[Debug]\r\nOther=keep\r\n[Main]\nName=简约\n"
+        let expected = "[Debug]\r\nOther=keep\r\nSkipVideoCardScoreUpdate=1\r\n[Main]\nName=简约\n"
+        let originalData = bom + (try #require(original.data(using: .utf16LittleEndian)))
+        let expectedData = bom + (try #require(expected.data(using: .utf16LittleEndian)))
+        try originalData.write(to: config)
+
+        #expect(try OnlineGameInitialConfiguration.applySkipVideoCardScoreUpdate(in: bottle))
+        #expect(try Data(contentsOf: config) == expectedData)
+        #expect(JX3INIReader(url: config).string("Debug", "SkipVideoCardScoreUpdate") == "1")
+    }
+
+    @Test func configurationPollingWaitsForNestedInstallAndRetriesIncompleteFile() async throws {
+        let bottle = try temporaryBottle()
+        defer { try? FileManager.default.removeItem(at: bottle) }
+        let launcherDirectory = bottle.appendingPathComponent("drive_c/SeasunGame/SeasunGame", isDirectory: true)
+        let launcher = launcherDirectory.appendingPathComponent(OnlineGameMode.jx3LauncherName)
+        try FileManager.default.createDirectory(at: launcherDirectory, withIntermediateDirectories: true)
+        try Data().write(to: launcher)
+
+        let gameRoot = launcherDirectory.appendingPathComponent("Game/JX3/bin/zhcn_hd", isDirectory: true)
+        let config = gameRoot.appendingPathComponent("config.ini")
+        let machineConfig = gameRoot.appendingPathComponent("config/machine_config.ini")
+        let poll = OnlineGameInitialConfiguration.startPolling(
+            for: bottle,
+            installation: OnlineGameInstallation(clientURL: nil, launcherURL: launcher),
+            interval: .milliseconds(10),
+            timeout: .seconds(2)
         )
+        defer { poll.cancel() }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!FileManager.default.fileExists(atPath: gameRoot.path))
         try FileManager.default.createDirectory(
-            at: config.deletingLastPathComponent(),
+            at: machineConfig.deletingLastPathComponent(),
             withIntermediateDirectories: true
         )
+        let machineContents = "[Performance]\nDLSS=2\nOther=keep\n"
+        try machineContents.write(to: machineConfig, atomically: true, encoding: .utf8)
+        let emptyConfig = Data()
+        try emptyConfig.write(to: config)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(try Data(contentsOf: config) == emptyConfig)
 
-        OnlineGameInitialConfiguration.startPolling(
-            for: bottle,
-            interval: .milliseconds(20)
-        )
-        try await Task.sleep(for: .milliseconds(40))
-        try "[Debug]\nOther=keep\n".write(
-            to: config,
-            atomically: true,
-            encoding: .utf8
-        )
-        try await Task.sleep(for: .milliseconds(120))
+        let temporarilyCorruptConfig = Data([0, 1, 2, 3])
+        try temporarilyCorruptConfig.write(to: config, options: .atomic)
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(try Data(contentsOf: config) == temporarilyCorruptConfig)
 
-        let contents = try String(contentsOf: config, encoding: .utf8)
-        #expect(contents.contains("SkipVideoCardScoreUpdate=1"))
-        #expect(contents.contains("Other=keep"))
+        let contents = "[Debug]\nOther=keep\n"
+        try contents.write(to: config, atomically: true, encoding: .utf8)
+        await poll.value
+        #expect(try String(contentsOf: config, encoding: .utf8) == contents + "SkipVideoCardScoreUpdate=1\n")
+        #expect(try String(contentsOf: machineConfig, encoding: .utf8) == machineContents)
+
+        let binaryDirectory = gameRoot.appendingPathComponent("bin64", isDirectory: true)
+        try FileManager.default.createDirectory(at: binaryDirectory, withIntermediateDirectories: true)
+        try Data().write(to: binaryDirectory.appendingPathComponent(OnlineGameMode.jx3ClientName))
+        #expect(OnlineGameDiscovery.jx3GameDirectory(in: bottle)?.resolvingSymlinksInPath().path
+            == gameRoot.resolvingSymlinksInPath().path)
     }
 
     @Test func dlssFrameGenerationTogglePatchesJX3MachineConfig() throws {

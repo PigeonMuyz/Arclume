@@ -6,35 +6,56 @@ nonisolated enum WineRuntimeProvider: String, Codable, CaseIterable, Identifiabl
 
     static let defaultsKey = "wine-runtime-provider"
     var id: String { rawValue }
-    var title: String { self == .arclume ? "Arclume Runtime" : "Nefinita" }
-    var deliveryTitle: String { self == .arclume ? "下载编译好的 Arclume Runtime" : "在本机编译 Nefinita" }
+    var title: String {
+        switch self {
+        case .arclume: "Arclume Runtime"
+        case .nefinita: "Nefinita"
+        }
+    }
+    var deliveryTitle: String {
+        switch self {
+        case .arclume: "下载编译好的 Arclume Runtime"
+        case .nefinita: "在本机编译 Nefinita"
+        }
+    }
 
     static func selected(in defaults: UserDefaults) -> Self {
         defaults.string(forKey: defaultsKey).flatMap(Self.init(rawValue:)) ?? .arclume
     }
     static var selected: Self { selected(in: UserDefaults(suiteName: suiteName) ?? .standard) }
-    static var managedPrefixes: [URL] { [selected.prefixURL()] }
+    static var managedPrefixes: [URL] { [Self.arclume.prefixURL()] }
+
+    static func sharedPrefixProvider(in defaults: UserDefaults) -> Self {
+        selected(in: defaults)
+    }
 
     func prefixURL(root: URL? = nil) -> URL {
-        // The provider selects an engine, never a different game/data directory.
-        (root ?? ARCLUME_SUPPORT_FOLDER_URL).appendingPathComponent("ALBottles", isDirectory: true)
+        let root = root ?? ARCLUME_SUPPORT_FOLDER_URL
+        return root.appendingPathComponent("ALBottles", isDirectory: true)
     }
 
     static func provider(for prefix: URL, root: URL? = nil, defaults: UserDefaults? = nil) -> Self? {
-        let provider = defaults.map { selected(in: $0) } ?? selected
-        guard provider.prefixURL(root: root).resolvingSymlinksInPath().standardizedFileURL == prefix.resolvingSymlinksInPath().standardizedFileURL else { return nil }
-        return provider
+        let path = prefix.resolvingSymlinksInPath().standardizedFileURL.path
+        guard Self.arclume.prefixURL(root: root).resolvingSymlinksInPath().standardizedFileURL.path == path else { return nil }
+        return sharedPrefixProvider(in: defaults ?? UserDefaults(suiteName: suiteName) ?? .standard)
     }
 
     static func runtimeURL(for prefix: URL) -> URL {
-        provider(for: prefix) == .nefinita ? NefinitaRuntime.installationURL : BundledWineRuntime.installationURL
+        switch provider(for: prefix) {
+        case .nefinita: NefinitaRuntime.installationURL
+        default: BundledWineRuntime.installationURL
+        }
     }
 
     static func ensureRuntime(for prefix: URL) throws -> URL {
         guard let provider = provider(for: prefix) else { throw BundledWineRuntimeError.invalidPrefix }
-        if provider == .arclume { return try BundledWineRuntime.ensureInstalled() }
-        guard NefinitaRuntime.isReady() else { throw NefinitaBuildError.notBuilt }
-        return NefinitaRuntime.installationURL
+        switch provider {
+        case .arclume:
+            return try BundledWineRuntime.ensureInstalled()
+        case .nefinita:
+            guard NefinitaRuntime.isReady() else { throw NefinitaBuildError.notBuilt }
+            return NefinitaRuntime.installationURL
+        }
     }
 
     /// Invalidate queued launches and keep new launches blocked until the selection

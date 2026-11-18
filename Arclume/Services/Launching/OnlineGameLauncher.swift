@@ -15,7 +15,7 @@ enum JX3RuntimeActivityState: Equatable, Sendable {
     var title: String {
         switch self {
         case .idle: "未运行"
-        case .launching: "正在启动剑网3启动器"
+        case .launching: "正在启动剑网3"
         case .launcherRunning: "剑网3启动器正在运行"
         case .gameRunning: "剑网3游戏本体正在运行"
         }
@@ -61,11 +61,13 @@ struct JX3RuntimeActivity: Equatable, Sendable {
 
 struct OnlineGameLaunchSession: Sendable {
     let processIdentifier: Int32
-    let logURL: URL
+    let executableName: String
+    let logURL: URL?
     let bottleURL: URL
     let runtime: OnlineGameRuntimeKind
     let crossOverAppPath: String?
     let closeLauncherWhenGameStarts: Bool
+    var installationBottleURL: URL? = nil
 }
 
 enum OnlineGameInitialConfiguration {
@@ -96,21 +98,30 @@ enum OnlineGameInitialConfiguration {
         var preservingValues: Set<String> = []
     }
 
+    nonisolated private struct INILine {
+        var text: String
+        var ending: String
+    }
+
     private static let defaultPollInterval: Duration = .seconds(2)
-    private static let maximumPollAttempts = 900 // 30 minutes while the game downloads
+    private static let defaultPollTimeout: Duration = .seconds(24 * 60 * 60)
     private static let pollingRegistry = PollingRegistry()
+    nonisolated private static let iniWriteLock = NSLock()
 
     /// The launcher creates these files while the game is being downloaded.
     /// Re-running this is safe: the same Bottle is only polled once at a time,
     /// and a new application process can start a fresh repair after a game update.
+    @discardableResult
     static func startPolling(
         for bottleURL: URL,
-        interval: Duration = defaultPollInterval
-    ) {
-        let bottlePath = bottleURL.standardizedFileURL.path
-        Task(priority: .utility) {
+        installation: OnlineGameInstallation? = nil,
+        interval: Duration = defaultPollInterval,
+        timeout: Duration = defaultPollTimeout
+    ) -> Task<Void, Never> {
+        let bottlePath = bottleURL.resolvingSymlinksInPath().standardizedFileURL.path
+        return Task(priority: .utility) {
             guard await pollingRegistry.claim(bottlePath) else { return }
-            await poll(for: targets(in: bottleURL), interval: interval)
+            await poll(for: bottleURL, installation: installation, interval: interval, timeout: timeout)
             await pollingRegistry.release(bottlePath)
         }
     }
@@ -139,55 +150,60 @@ enum OnlineGameInitialConfiguration {
         at url: URL,
         updates: [INIUpdate]
     ) throws -> Bool {
+        iniWriteLock.lock()
+        defer { iniWriteLock.unlock() }
+
         guard FileManager.default.fileExists(atPath: url.path) else {
             return false
         }
         guard !updates.isEmpty else { return true }
 
         let data = try Data(contentsOf: url)
-        guard String(data: data, encoding: .utf8) != nil else {
+        guard let document = JX3INIText(data: data) else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        // Foundation's failable decoder consumes a UTF-8 BOM. Keep it when
-        // editing a client's existing INI instead of silently changing its format.
-        var contents = String(decoding: data, as: UTF8.self)
+        guard !document.contents.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return false
+        }
 
-        let newline = contents.contains("\r\n") ? "\r\n" : "\n"
-        contents = contents.replacingOccurrences(of: "\r\n", with: "\n")
-        var lines = contents.components(separatedBy: "\n")
+        let contents = document.contents
+        var lines: [INILine] = []
+        contents.enumerateSubstrings(in: contents.startIndex..<contents.endIndex, options: .byLines) {
+            _, textRange, lineRange, _ in
+            lines.append(INILine(
+                text: String(contents[textRange]),
+                ending: String(contents[textRange.upperBound..<lineRange.upperBound])
+            ))
+        }
+        let newline = lines.first(where: { !$0.ending.isEmpty })?.ending ?? "\n"
         var didChange = false
 
         for update in updates {
             didChange = upsertINIValue(
                 in: &lines,
-                section: update.section,
-                key: update.key,
-                value: update.value,
-                preservingValues: update.preservingValues
+                update: update,
+                newline: newline
             ) || didChange
         }
 
         guard didChange else { return true }
-        try lines.joined(separator: newline).write(
-            to: url,
-            atomically: true,
-            encoding: .utf8
-        )
+        let replacement = try document.encode(lines.map { $0.text + $0.ending }.joined())
+        // The client can update the file independently of Arclume.
+        guard try Data(contentsOf: url) == data else { return false }
+        try replacement.write(to: url, options: .atomic)
         return true
     }
 
     nonisolated private static func upsertINIValue(
-        in lines: inout [String],
-        section: String,
-        key: String,
-        value: String,
-        preservingValues: Set<String>
+        in lines: inout [INILine],
+        update: INIUpdate,
+        newline: String
     ) -> Bool {
         var sectionStart: Int?
         var sectionEnd = lines.count
 
         for index in lines.indices {
-            let trimmed = normalizedLine(lines[index])
+            let trimmed = lines[index].text.trimmingCharacters(in: .whitespaces)
             guard trimmed.hasPrefix("[") && trimmed.hasSuffix("]") else {
                 continue
             }
@@ -198,53 +214,70 @@ enum OnlineGameInitialConfiguration {
             }
             if trimmed.dropFirst().dropLast()
                 .trimmingCharacters(in: .whitespaces)
-                .caseInsensitiveCompare(section) == .orderedSame {
+                .caseInsensitiveCompare(update.section) == .orderedSame {
                 sectionStart = index
             }
         }
 
+        let newEntry = "\(update.key)=\(update.value)"
         if let sectionStart {
             for index in (sectionStart + 1)..<sectionEnd {
-                let trimmed = normalizedLine(lines[index])
-                guard !trimmed.hasPrefix(";") && !trimmed.hasPrefix("#") else {
-                    continue
-                }
-                let parts = trimmed.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-                guard let storedKey = parts.first,
-                      storedKey.trimmingCharacters(in: .whitespaces)
-                          .caseInsensitiveCompare(key) == .orderedSame
+                let line = lines[index].text
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.hasPrefix(";") && !trimmed.hasPrefix("#"),
+                      let separator = line.firstIndex(of: "="),
+                      line[..<separator].trimmingCharacters(in: .whitespaces)
+                        .caseInsensitiveCompare(update.key) == .orderedSame
                 else {
                     continue
                 }
-
-                if parts.count == 2,
-                   preservingValues.contains(parts[1].trimmingCharacters(in: .whitespaces)) {
+                let storedValue = line[line.index(after: separator)...]
+                let trimmedValue = storedValue.trimmingCharacters(in: .whitespaces)
+                if trimmedValue == update.value || update.preservingValues.contains(trimmedValue) {
                     return false
                 }
 
-                let replacement = "\(key)=\(value)"
-                guard lines[index] != replacement else { return false }
-                lines[index] = replacement
+                let valueStart = storedValue.firstIndex(where: { !$0.isWhitespace }) ?? storedValue.endIndex
+                let valueEnd = storedValue.lastIndex(where: { !$0.isWhitespace })
+                    .map { storedValue.index(after: $0) } ?? valueStart
+                lines[index].text.replaceSubrange(valueStart..<valueEnd, with: update.value)
                 return true
             }
 
-            lines.insert("\(key)=\(value)", at: sectionEnd)
-            return true
+            insertINILines([newEntry], at: sectionEnd, into: &lines, newline: newline)
         } else {
-            if !lines.isEmpty, !lines[lines.count - 1].isEmpty {
-                lines.append("")
-            }
-            lines.append("[\(section)]")
-            lines.append("\(key)=\(value)")
-            return true
+            let padding = lines.last?.text.isEmpty == false ? [""] : []
+            insertINILines(padding + ["[\(update.section)]", newEntry], at: lines.count, into: &lines, newline: newline)
         }
+        return true
+    }
+
+    nonisolated private static func insertINILines(
+        _ texts: [String],
+        at index: Int,
+        into lines: inout [INILine],
+        newline: String
+    ) {
+        let endsWithNewline = lines.last?.ending.isEmpty == false
+        let insertingAtEnd = index == lines.endIndex
+        if insertingAtEnd && !endsWithNewline && index > lines.startIndex {
+            lines[index - 1].ending = newline
+        }
+        let newLines = texts.enumerated().map { offset, text in
+            let needsNewline = !insertingAtEnd || endsWithNewline || offset < texts.count - 1
+            return INILine(text: text, ending: needsNewline ? newline : "")
+        }
+        lines.insert(contentsOf: newLines, at: index)
     }
 
     /// Repair the required client setting on every fresh launch, not only import.
     /// Never create a partial config before the client has generated its defaults.
     @discardableResult
-    static func applySkipVideoCardScoreUpdate(in bottleURL: URL) throws -> Bool {
-        guard let gameRoot = OnlineGameDiscovery.jx3GameDirectory(in: bottleURL) else {
+    nonisolated static func applySkipVideoCardScoreUpdate(
+        in bottleURL: URL,
+        installation: OnlineGameInstallation? = nil
+    ) throws -> Bool {
+        guard let gameRoot = OnlineGameDiscovery.jx3GameDirectory(in: bottleURL, installation: installation) else {
             return false
         }
         return try enforceINIValue(
@@ -259,11 +292,12 @@ enum OnlineGameInitialConfiguration {
     /// This does not enable upscaling or frame generation in the game's quality settings.
     /// Keep the API/preferences name for compatibility with existing saved options.
     @discardableResult
-    static func applyDLSSFrameGeneration(
+    nonisolated static func applyDLSSFrameGeneration(
         enabled: Bool,
-        in bottleURL: URL
+        in bottleURL: URL,
+        installation: OnlineGameInstallation? = nil
     ) throws -> Bool {
-        guard let gameRoot = OnlineGameDiscovery.jx3GameDirectory(in: bottleURL) else {
+        guard let gameRoot = OnlineGameDiscovery.jx3GameDirectory(in: bottleURL, installation: installation) else {
             return false
         }
         let machineConfig = gameRoot
@@ -278,11 +312,7 @@ enum OnlineGameInitialConfiguration {
         )
     }
 
-    private static func targets(in bottleURL: URL) -> [Target] {
-        guard let gameRoot = OnlineGameDiscovery.jx3GameDirectory(in: bottleURL) else {
-            return []
-        }
-
+    nonisolated private static func targets(in gameRoot: URL) -> [Target] {
         return [
             Target(
                 url: gameRoot.appendingPathComponent("config.ini"),
@@ -302,12 +332,35 @@ enum OnlineGameInitialConfiguration {
         ]
     }
 
-    private static func poll(for targets: [Target], interval: Duration) async {
-        var pending = targets
+    @concurrent private static func poll(
+        for bottleURL: URL,
+        installation: OnlineGameInstallation?,
+        interval: Duration,
+        timeout: Duration
+    ) async {
+        let clock = ContinuousClock()
+        let deadline = clock.now + timeout
+        var nextDiscovery = clock.now
+        var knownInstallation = installation ?? OnlineGameInstallation(clientURL: nil, launcherURL: nil)
+        var pending: [Target]?
+        var loggedFailures: Set<URL> = []
 
-        for attempt in 0..<maximumPollAttempts {
+        while !Task.isCancelled && clock.now < deadline {
+            if pending == nil {
+                if let gameRoot = OnlineGameDiscovery.jx3GameDirectory(in: bottleURL, installation: knownInstallation) {
+                    pending = targets(in: gameRoot)
+                } else if clock.now >= nextDiscovery {
+                    // The default and launcher-relative paths are cheap to check.
+                    // Refresh the filesystem scan less often for custom installs.
+                    knownInstallation = OnlineGameDiscovery.jx3Installation(in: bottleURL)
+                    if let gameRoot = OnlineGameDiscovery.jx3GameDirectory(in: bottleURL, installation: knownInstallation) {
+                        pending = targets(in: gameRoot)
+                    }
+                    nextDiscovery = clock.now + interval * 15
+                }
+            }
             var nextPending: [Target] = []
-            for target in pending {
+            for target in pending ?? [] {
                 do {
                     if try enforceINIValue(
                         at: target.url,
@@ -319,56 +372,49 @@ enum OnlineGameInitialConfiguration {
                         let detail = target.preservingValues.isEmpty
                             ? "\(target.key)=\(target.value)"
                             : "\(target.key)（保留已有能力声明）"
-                        console.log("剑网3初始化配置已确认：\(detail)")
+                        await console.log("剑网3初始化配置已确认：\(detail)")
                     } else {
                         nextPending.append(target)
                     }
                 } catch {
                     nextPending.append(target)
-                    console.warn(
-                        "剑网3初始化配置暂时无法写入 \(target.url.lastPathComponent)：\(error.localizedDescription)"
-                    )
+                    if loggedFailures.insert(target.url).inserted {
+                        await console.warn(
+                            "剑网3初始化配置暂时无法写入 \(target.url.lastPathComponent)：\(error.localizedDescription)"
+                        )
+                    }
                 }
             }
 
-            pending = nextPending
-            if pending.isEmpty {
-                console.log("剑网3初始化配置轮询完成")
-                return
+            if pending != nil {
+                guard !nextPending.isEmpty else { return }
+                pending = nextPending
             }
-            if attempt + 1 < maximumPollAttempts {
-                try? await Task.sleep(for: interval)
-            }
+            do { try await clock.sleep(until: min(clock.now + interval, deadline)) }
+            catch { return }
         }
 
-        console.warn("剑网3初始化配置轮询超时，未等到全部游戏配置文件")
-    }
-
-    nonisolated private static func normalizedLine(_ line: String) -> String {
-        line.trimmingCharacters(
-            in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}"))
-        )
+        if !Task.isCancelled {
+            await console.warn("剑网3初始化配置轮询超时，未等到全部游戏配置文件")
+        }
     }
 }
 
 enum OnlineGameLauncher {
-    private struct ActiveWineProcess {
+    nonisolated private struct ActiveWineProcess {
         let process: Process
-        let logURL: URL
-        let bottleURL: URL
-        let runtime: OnlineGameRuntimeKind
-        let crossOverAppPath: String?
-        let closeLauncherWhenGameStarts: Bool
+        let session: OnlineGameLaunchSession
     }
 
-    private static let processLock = NSLock()
-    private static var activeWineProcesses: [Int32: ActiveWineProcess] = [:]
+    nonisolated private static let processLock = NSLock()
+    // Launch, monitor and termination callbacks all guard this registry with processLock.
+    nonisolated(unsafe) private static var activeWineProcesses: [Int32: ActiveWineProcess] = [:]
 
     /// Returns whether a launch initiated by this app is still alive. Wine's
     /// x86_64 loader is not exposed as a normal NSWorkspace application under
     /// Rosetta, so process ownership is a more reliable source of truth than
     /// looking for `SeasunGame.exe` in NSWorkspace.
-    static func isActive(_ session: OnlineGameLaunchSession) -> Bool {
+    nonisolated static func isActive(_ session: OnlineGameLaunchSession) -> Bool {
         processLock.lock()
         defer { processLock.unlock() }
         return activeWineProcesses[session.processIdentifier]?.process.isRunning == true
@@ -391,13 +437,15 @@ enum OnlineGameLauncher {
             var logOffset: UInt64 = 0
 
             while !Task.isCancelled {
-                let previousLogOffset = logOffset
-                let logRead = await Task.detached(priority: .utility) {
-                    readLaunchLog(from: session.logURL, offset: previousLogOffset)
-                }.value
-                logOffset = logRead.nextOffset
-                if containsClientLaunchSignal(in: logRead.contents) {
-                    clientLaunchObservedInLog = true
+                if let logURL = session.logURL {
+                    let previousLogOffset = logOffset
+                    let logRead = await Task.detached(priority: .utility) {
+                        readLaunchLog(from: logURL, offset: previousLogOffset)
+                    }.value
+                    logOffset = logRead.nextOffset
+                    if containsClientLaunchSignal(in: logRead.contents) {
+                        clientLaunchObservedInLog = true
+                    }
                 }
 
                 let activity = await Task.detached(priority: .utility) {
@@ -448,70 +496,129 @@ enum OnlineGameLauncher {
         monitor(session, onUpdate: { _ in }, onTermination: onTermination)
     }
 
-    private static func activeLaunchSession() -> OnlineGameLaunchSession? {
-        processLock.lock()
-        defer { processLock.unlock() }
-
-        activeWineProcesses = activeWineProcesses.filter { $0.value.process.isRunning }
-        guard let (processIdentifier, activeProcess) = activeWineProcesses.first else {
-            return nil
+    static func reusableJX3LaunchSession(
+        from sessions: [OnlineGameLaunchSession],
+        in bottleURL: URL,
+        requiresClient: Bool
+    ) -> OnlineGameLaunchSession? {
+        let bottlePath = bottleURL.standardizedFileURL.resolvingSymlinksInPath().path
+        let matchingSessions = sessions.filter { session in
+            let sessionBottle = session.installationBottleURL ?? session.bottleURL
+            return sessionBottle.standardizedFileURL.resolvingSymlinksInPath().path == bottlePath
         }
+        let clientSession = matchingSessions.first {
+            $0.executableName.caseInsensitiveCompare(OnlineGameMode.jx3ClientName) == .orderedSame
+        }
+        return clientSession ?? (requiresClient ? nil : matchingSessions.first)
+    }
+
+    private static func activeLaunchSession(
+        in bottleURL: URL,
+        requiresClient: Bool = false
+    ) -> OnlineGameLaunchSession? {
+        processLock.lock()
+        activeWineProcesses = activeWineProcesses.filter { $0.value.process.isRunning }
+        let sessions = activeWineProcesses.values.map(\.session)
+        processLock.unlock()
+        return reusableJX3LaunchSession(from: sessions, in: bottleURL, requiresClient: requiresClient)
+    }
+
+    private static func reusableJX3LaunchSession(
+        in bottleURL: URL,
+        crossOverAppPath: String?,
+        runtime: OnlineGameRuntimeKind,
+        requiresClient: Bool
+    ) async -> OnlineGameLaunchSession? {
+        if let session = activeLaunchSession(in: bottleURL, requiresClient: requiresClient) {
+            return session
+        }
+        guard requiresClient else { return nil }
+
+        let activity = await Task.detached(priority: .utility) {
+            currentJX3Activity(for: nil, clientLaunchObservedInLog: false, in: bottleURL)
+        }.value
+        // Another request may have started a direct launch while the process scan was running.
+        if let session = activeLaunchSession(in: bottleURL, requiresClient: true) {
+            return session
+        }
+        guard let clientPID = activity.gameProcessIdentifiers.first else { return nil }
         return OnlineGameLaunchSession(
-            processIdentifier: processIdentifier,
-            logURL: activeProcess.logURL,
-            bottleURL: activeProcess.bottleURL,
-            runtime: activeProcess.runtime,
-            crossOverAppPath: activeProcess.crossOverAppPath,
-            closeLauncherWhenGameStarts: activeProcess.closeLauncherWhenGameStarts
+            processIdentifier: clientPID,
+            executableName: OnlineGameMode.jx3ClientName,
+            logURL: nil,
+            bottleURL: bottleURL,
+            runtime: runtime,
+            crossOverAppPath: crossOverAppPath,
+            closeLauncherWhenGameStarts: false
         )
     }
 
     @discardableResult
+    @MainActor
     static func launchJX3(
         in bottleURL: URL,
         crossOverAppPath: String?,
         options: GameOptions
     ) async throws -> OnlineGameLaunchSession {
-        let launchTicket = OnlineGameRuntimeKind.selected() == .bundledWine
+        let runtime = OnlineGameRuntimeKind.selected()
+        let requiresClient = options.jx3SkipLauncher
+        let launchTicket = runtime == .bundledWine
             ? try ArclumeWineStopService.launchTicket() : nil
-        if let activeSession = activeLaunchSession() {
-            console.log("复用已运行的剑网3 Wine 会话（PID \(activeSession.processIdentifier)）")
+        if let activeSession = await reusableJX3LaunchSession(
+            in: bottleURL, crossOverAppPath: crossOverAppPath, runtime: runtime, requiresClient: requiresClient
+        ) {
+            OnlineGameInitialConfiguration.startPolling(for: bottleURL)
+            console.log("复用已运行的剑网3 Wine 会话（\(activeSession.executableName)，PID \(activeSession.processIdentifier)）")
             return activeSession
         }
 
-        OnlineGameMode.applyDefaultRuntimePreferences(to: options)
-        if OnlineGameRuntimeKind.selected() == .bundledWine {
-            try await WineWarmupService.shared.prepareForLaunch(prefix: bottleURL, wineMSync: options.wineMSync)
-        }
         let installation = OnlineGameDiscovery.jx3Installation(in: bottleURL)
-        guard let executableURL = installation.preferredLaunchURL else {
+        let clientArguments = options.gameArguments.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard let target = installation.launchTarget(
+            skipLauncher: requiresClient, clientArguments: clientArguments
+        ) else {
             throw CocoaError(.fileNoSuchFile)
         }
+        OnlineGameMode.applyDefaultRuntimePreferences(to: options)
+        if runtime == .bundledWine {
+            if options.cxGraphicsBackend == "dxmt" {
+                try await GameMetalShaderCache.prepare(prefix: bottleURL)
+            }
+            try await WineWarmupService.shared.prepareForLaunch(prefix: bottleURL, wineMSync: options.wineMSync)
+        }
+        var shouldPollForConfiguration = false
         do {
-            if try OnlineGameInitialConfiguration.applySkipVideoCardScoreUpdate(in: bottleURL) {
+            if try OnlineGameInitialConfiguration.applySkipVideoCardScoreUpdate(in: bottleURL, installation: installation) {
                 console.log("剑网3启动配置已确认：SkipVideoCardScoreUpdate=1")
             } else {
-                // A first download may create config.ini after the launcher opens.
-                OnlineGameInitialConfiguration.startPolling(for: bottleURL)
-                console.log("剑网3配置尚未生成，等待补齐 SkipVideoCardScoreUpdate")
+                shouldPollForConfiguration = true
             }
         } catch {
+            shouldPollForConfiguration = true
             console.warn("剑网3 SkipVideoCardScoreUpdate 暂时无法写入：\(error.localizedDescription)")
         }
-        let machineConfig = JX3ConfigPresetImporter.configURL(in: bottleURL).deletingLastPathComponent()
+        let machineConfig = JX3GameConfiguration.configURL(in: bottleURL, installation: installation)
+            .deletingLastPathComponent()
             .appendingPathComponent("config", isDirectory: true)
             .appendingPathComponent("machine_config.ini")
         try await JX3GPUProfileStore.shared.reapply(at: machineConfig)
         do {
             if try OnlineGameInitialConfiguration.applyDLSSFrameGeneration(
                 enabled: options.dlssFrameGenerationEnabled,
-                in: bottleURL
+                in: bottleURL,
+                installation: installation
             ) {
                 let value = options.dlssFrameGenerationEnabled ? "2" : "1"
                 console.log("剑网3 DLSS 能力声明已设置为 DLSS=\(value)；实际画质开关由客户端控制")
+            } else {
+                shouldPollForConfiguration = true
             }
         } catch {
+            shouldPollForConfiguration = true
             console.warn("剑网3 DLSS 能力声明暂时无法写入：\(error.localizedDescription)")
+        }
+        if shouldPollForConfiguration {
+            OnlineGameInitialConfiguration.startPolling(for: bottleURL, installation: installation)
         }
         do {
             if try BundledOnlineGameResources.installNVNGX(into: bottleURL) {
@@ -522,37 +629,43 @@ enum OnlineGameLauncher {
             // best-effort refresh must not prevent Wine itself from starting.
             console.warn("剑网3 NVNGX 更新暂时无法完成：\(error.localizedDescription)")
         }
+        let reusableSession = await reusableJX3LaunchSession(
+            in: bottleURL, crossOverAppPath: crossOverAppPath, runtime: runtime, requiresClient: requiresClient
+        )
+        if let activeSession = activeLaunchSession(in: bottleURL, requiresClient: requiresClient) ?? reusableSession {
+            console.log("复用已运行的剑网3 Wine 会话（\(activeSession.executableName)，PID \(activeSession.processIdentifier)）")
+            return activeSession
+        }
         return try launchExecutable(
-            executableURL,
+            target,
             in: bottleURL,
+            runtime: runtime,
             crossOverAppPath: crossOverAppPath,
-            arguments: installation.preferredLaunchArguments,
             options: options,
-            currentDirectoryURL: installation.preferredWorkingDirectory,
-            closeLauncherWhenGameStarts: options.closeLauncherWhenGameStarts,
-            wineLaunchTicket: launchTicket
+            closeLauncherWhenGameStarts: !requiresClient && options.closeLauncherWhenGameStarts,
+            wineLaunchTicket: launchTicket,
+            shaderGameID: OnlineGameMode.jx3GameID
         )
     }
 
-    static func launchExecutable(
-        _ executableURL: URL,
+    private static func launchExecutable(
+        _ target: OnlineGameInstallation.LaunchTarget,
         in bottleURL: URL,
+        runtime: OnlineGameRuntimeKind,
         crossOverAppPath: String?,
-        arguments: [String],
         options: GameOptions,
-        currentDirectoryURL: URL? = nil,
         closeLauncherWhenGameStarts: Bool = false,
-        wineLaunchTicket: Int? = nil
+        wineLaunchTicket: Int? = nil,
+        shaderGameID: String? = nil
     ) throws -> OnlineGameLaunchSession {
-        if OnlineGameRuntimeKind.selected() == .bundledWine {
+        if runtime == .bundledWine {
             return try launchBundledWineExecutable(
-                executableURL,
+                target,
                 in: bottleURL,
-                arguments: arguments,
                 options: options,
-                currentDirectoryURL: currentDirectoryURL,
                 closeLauncherWhenGameStarts: closeLauncherWhenGameStarts,
-                wineLaunchTicket: wineLaunchTicket
+                wineLaunchTicket: wineLaunchTicket,
+                shaderGameID: shaderGameID
             )
         }
         guard let crossOverAppPath else {
@@ -562,12 +675,16 @@ enum OnlineGameLauncher {
         let logURL = try makeLaunchLogURL()
         let logHandle = try FileHandle(forWritingTo: logURL)
         writeLaunchLog("使用已安装的 CrossOver 运行时", to: logHandle)
+        let executableName = target.executableURL.lastPathComponent
+        writeLaunchLog("启动程序：\(executableName)", to: logHandle)
+        if target.arguments.first == OnlineGameInstallation.directClientArgument {
+            writeLaunchLog("剑网3直启参数：\(OnlineGameInstallation.directClientArgument)", to: logHandle)
+        }
 
         var environment = ProcessInfo.processInfo.environment
         environment["CX_ROOT"] = crossOverURL
             .appendingPathComponent("Contents/SharedSupport/CrossOver")
             .path
-        environment["WINEPREFIX"] = bottleURL.path
         environment["WINEDEBUG"] = "-all"
         environment["WINEMSYNC"] = options.wineMSync ? "1" : "0"
         OnlineGameBottleConfiguration.applyProcessEnvironment(to: &environment)
@@ -592,27 +709,26 @@ enum OnlineGameLauncher {
             throw CocoaError(.fileNoSuchFile)
         }
 
-        let process = Process()
-        process.executableURL = wineURL
-        process.arguments = ["--bottle", bottleURL.lastPathComponent, executableURL.path] + arguments
-        process.environment = environment
-        process.currentDirectoryURL = currentDirectoryURL ?? executableURL.deletingLastPathComponent()
-        process.standardInput = FileHandle.nullDevice
+        let process = makeWineProcess(
+            wineURL: wineURL, target: target, bottleURL: bottleURL, runtime: runtime, environment: environment
+        )
         process.standardOutput = logHandle
         process.standardError = logHandle
         try process.run()
 
         let processIdentifier = process.processIdentifier
         writeLaunchLog("Wine 已启动（PID \(processIdentifier)）", to: logHandle)
-        processLock.lock()
-        activeWineProcesses[processIdentifier] = ActiveWineProcess(
-            process: process,
+        let session = OnlineGameLaunchSession(
+            processIdentifier: processIdentifier,
+            executableName: executableName,
             logURL: logURL,
             bottleURL: bottleURL,
             runtime: .crossOver,
             crossOverAppPath: crossOverAppPath,
             closeLauncherWhenGameStarts: closeLauncherWhenGameStarts
         )
+        processLock.lock()
+        activeWineProcesses[processIdentifier] = ActiveWineProcess(process: process, session: session)
         processLock.unlock()
         process.terminationHandler = { _ in
             writeLaunchLog("Wine 启动命令已退出（状态 \(process.terminationStatus)）", to: logHandle)
@@ -623,77 +739,69 @@ enum OnlineGameLauncher {
             processLock.unlock()
         }
 
-        return OnlineGameLaunchSession(
-            processIdentifier: processIdentifier,
-            logURL: logURL,
-            bottleURL: bottleURL,
-            runtime: .crossOver,
-            crossOverAppPath: crossOverAppPath,
-            closeLauncherWhenGameStarts: closeLauncherWhenGameStarts
-        )
+        return session
     }
 
     private static func launchBundledWineExecutable(
-        _ executableURL: URL,
+        _ target: OnlineGameInstallation.LaunchTarget,
         in bottleURL: URL,
-        arguments: [String],
         options: GameOptions,
-        currentDirectoryURL: URL?,
         closeLauncherWhenGameStarts: Bool,
-        wineLaunchTicket: Int?
+        wineLaunchTicket: Int?,
+        shaderGameID: String? = nil
     ) throws -> OnlineGameLaunchSession {
         let launchTicket = try wineLaunchTicket ?? ArclumeWineStopService.launchTicket()
-        guard BundledWineRuntime.ownsPrefix(bottleURL),
-              BundledWineRuntime.isValidPrefix(at: bottleURL)
-        else {
+        guard BundledWineRuntime.ownsPrefix(bottleURL), BundledWineRuntime.isValidPrefix(at: bottleURL) else {
             throw BundledWineRuntimeError.invalidPrefix
         }
 
         let logURL = try makeLaunchLogURL()
         let logHandle = try FileHandle(forWritingTo: logURL)
-        writeLaunchLog("开始准备 Arclume 内置 Wine 运行时", to: logHandle)
+        let runtimeName = "Arclume Runtime"
+        writeLaunchLog("开始准备 \(runtimeName) 运行时", to: logHandle)
 
         let configuration: BundledWineRuntime.LaunchConfiguration
         do {
             configuration = try BundledWineRuntime.makeLaunchConfiguration(options: options, prefix: bottleURL)
             try OnlineGameBottleConfiguration.apply(to: bottleURL)
         } catch {
-            writeLaunchLog("内置 Wine 运行时准备失败：\(error.localizedDescription)", to: logHandle)
+            writeLaunchLog("\(runtimeName) 运行时准备失败：\(error.localizedDescription)", to: logHandle)
             writeLaunchFailure(error, stage: "runtime-preparation", to: logHandle)
             logHandle.closeFile()
             throw error
         }
 
         var environment = configuration.environment
-        environment["WINEPREFIX"] = bottleURL.path
-        environment = GameAdaptationRules.processEnvironment(environment, executable: executableURL, bottle: bottleURL)
+        environment = GameAdaptationRules.processEnvironment(environment, executable: target.executableURL, bottle: bottleURL)
+        if let shaderGameID, configuration.environment["CX_ACTIVE_GRAPHICS_BACKEND"] == "dxmt" {
+            try GameMetalShaderCache.configure(environment: &environment, prefix: bottleURL, gameID: shaderGameID)
+            writeLaunchLog("DXMT 0.80 着色器目录：\(environment["DXMT_SHADER_CACHE_PATH"] ?? "")", to: logHandle)
+        }
         // Focused input tracing is developer-only. It is limited to the IME
         // and clipboard driver channels, avoiding unbounded server tracing.
         if BundledWineRuntime.verboseWineTraceRequested {
             environment["WINEDEBUG"] = "-all,+timestamp,+pid,+tid,+imm,+clipboard"
         }
 
+        let process = makeWineProcess(
+            wineURL: configuration.wineURL, target: target, bottleURL: bottleURL,
+            runtime: .bundledWine, environment: environment
+        )
         writeLaunchLog(
-            "内置 Wine 命令：\(configuration.wineURL.path) \(executableURL.path) \(arguments.joined(separator: " "))",
+            "\(runtimeName) 命令：\(configuration.wineURL.path) \(process.arguments?.joined(separator: " ") ?? "")",
             to: logHandle
         )
 #if DEBUG
         BundledWineRuntime.appendLauncherDiagnostics(
-            runtimeURL: configuration.runtimeURL,
-            wineURL: configuration.wineURL,
-            executableURL: executableURL,
-            arguments: arguments,
-            environment: environment,
-            to: logHandle
+                runtimeURL: configuration.runtimeURL,
+                wineURL: configuration.wineURL,
+                executableURL: target.executableURL,
+                arguments: target.arguments,
+                environment: process.environment ?? environment,
+                to: logHandle
         )
 #endif
 
-        let process = Process()
-        process.executableURL = configuration.wineURL
-        process.arguments = [executableURL.path] + arguments
-        process.environment = environment
-        process.currentDirectoryURL = currentDirectoryURL ?? executableURL.deletingLastPathComponent()
-        process.standardInput = FileHandle.nullDevice
         process.standardOutput = logHandle
         process.standardError = logHandle
         do { try ArclumeWineStopService.withLaunchTicket(launchTicket) { try process.run() } }
@@ -704,20 +812,22 @@ enum OnlineGameLauncher {
         }
 
         let processIdentifier = process.processIdentifier
-        writeLaunchLog("内置 Wine 已启动（PID \(processIdentifier)）", to: logHandle)
-        processLock.lock()
-        activeWineProcesses[processIdentifier] = ActiveWineProcess(
-            process: process,
+        writeLaunchLog("\(runtimeName) 已启动（PID \(processIdentifier)）", to: logHandle)
+        let session = OnlineGameLaunchSession(
+            processIdentifier: processIdentifier,
+            executableName: target.executableURL.lastPathComponent,
             logURL: logURL,
             bottleURL: bottleURL,
             runtime: .bundledWine,
             crossOverAppPath: nil,
             closeLauncherWhenGameStarts: closeLauncherWhenGameStarts
         )
+        processLock.lock()
+        activeWineProcesses[processIdentifier] = ActiveWineProcess(process: process, session: session)
         processLock.unlock()
         process.terminationHandler = { terminatedProcess in
             writeLaunchLog(
-                "内置 Wine 启动命令已退出（reason \(terminatedProcess.terminationReason)，状态 \(terminatedProcess.terminationStatus)）",
+                "\(runtimeName) 启动命令已退出（reason \(terminatedProcess.terminationReason)，状态 \(terminatedProcess.terminationStatus)）",
                 to: logHandle
             )
             let didCrash = terminatedProcess.terminationReason == .uncaughtSignal
@@ -744,14 +854,27 @@ enum OnlineGameLauncher {
             closeLogAndForgetProcess()
         }
 
-        return OnlineGameLaunchSession(
-            processIdentifier: processIdentifier,
-            logURL: logURL,
-            bottleURL: bottleURL,
-            runtime: .bundledWine,
-            crossOverAppPath: nil,
-            closeLauncherWhenGameStarts: closeLauncherWhenGameStarts
-        )
+        return session
+    }
+
+    static func makeWineProcess(
+        wineURL: URL,
+        target: OnlineGameInstallation.LaunchTarget,
+        bottleURL: URL,
+        runtime: OnlineGameRuntimeKind,
+        environment: [String: String]
+    ) -> Process {
+        let bottleArguments = runtime == .crossOver ? ["--bottle", bottleURL.lastPathComponent] : []
+        var environment = environment
+        environment["WINEPREFIX"] = bottleURL.path
+
+        let process = Process()
+        process.executableURL = wineURL
+        process.arguments = bottleArguments + [target.executableURL.path] + target.arguments
+        process.environment = environment
+        process.currentDirectoryURL = target.workingDirectoryURL ?? target.executableURL.deletingLastPathComponent()
+        process.standardInput = FileHandle.nullDevice
+        return process
     }
 
     private static func writeLaunchFailure(_ error: Error, stage: String, to handle: FileHandle) {
@@ -771,7 +894,8 @@ enum OnlineGameLauncher {
         in bottleURL: URL,
         crossOverAppPath: String?
     ) async {
-        let runtime = OnlineGameRuntimeKind.selected()
+        let activeSession = activeLaunchSession(in: bottleURL)
+        let runtime = activeSession?.runtime ?? OnlineGameRuntimeKind.selected()
         await Task.detached(priority: .userInitiated) {
             for executableName in [
                 OnlineGameMode.jx3LauncherName,
@@ -786,11 +910,9 @@ enum OnlineGameLauncher {
             }
         }.value
 
-        let session = activeLaunchSession().flatMap {
-            $0.bottleURL.standardizedFileURL == bottleURL.standardizedFileURL ? $0 : nil
-        }
+        let session = activeLaunchSession(in: bottleURL)
         let initialActivity = await Task.detached(priority: .utility) {
-            currentJX3Activity(for: session, clientLaunchObservedInLog: false)
+            currentJX3Activity(for: session, clientLaunchObservedInLog: false, in: bottleURL)
         }.value
         terminateMacProcesses(
             Set(initialActivity.launcherProcessIdentifiers)
@@ -803,7 +925,7 @@ enum OnlineGameLauncher {
 
         try? await Task.sleep(nanoseconds: 2_000_000_000)
         let remainingActivity = await Task.detached(priority: .utility) {
-            currentJX3Activity(for: session, clientLaunchObservedInLog: false)
+            currentJX3Activity(for: session, clientLaunchObservedInLog: false, in: bottleURL)
         }.value
         terminateMacProcesses(
             Set(remainingActivity.launcherProcessIdentifiers)
@@ -844,7 +966,7 @@ enum OnlineGameLauncher {
         terminateMacProcesses(launcherOnlyPIDs, signal: SIGKILL)
     }
 
-    static func classifyJX3Activity(
+    nonisolated static func classifyJX3Activity(
         processList: String,
         openFiles: String,
         rootProcessIdentifier: Int32?,
@@ -915,9 +1037,14 @@ enum OnlineGameLauncher {
         let nextOffset: UInt64
     }
 
-    private static func currentJX3Activity(
+    static func isJX3ClientRunning() -> Bool {
+        !currentJX3Activity(for: nil, clientLaunchObservedInLog: false).gameProcessIdentifiers.isEmpty
+    }
+
+    nonisolated private static func currentJX3Activity(
         for session: OnlineGameLaunchSession?,
-        clientLaunchObservedInLog: Bool
+        clientLaunchObservedInLog: Bool,
+        in bottleURL: URL? = nil
     ) -> JX3RuntimeActivity {
         let processList = processOutput(
             executableURL: URL(fileURLWithPath: "/bin/ps"),
@@ -929,17 +1056,18 @@ enum OnlineGameLauncher {
             rootProcessIdentifier: rootPID
         )
         let openFiles = lsofOutput(for: processIDs)
+        let installationBottle = session?.installationBottleURL ?? session?.bottleURL ?? bottleURL
         return classifyJX3Activity(
             processList: processList,
             openFiles: openFiles,
             rootProcessIdentifier: rootPID,
             rootProcessIsRunning: session.map(isActive) ?? false,
             clientLaunchObservedInLog: clientLaunchObservedInLog,
-            requiredBottlePath: session?.bottleURL.standardizedFileURL.path
+            requiredBottlePath: installationBottle?.standardizedFileURL.resolvingSymlinksInPath().path
         )
     }
 
-    private static func parseProcessList(_ output: String) -> [ProcessListEntry] {
+    nonisolated private static func parseProcessList(_ output: String) -> [ProcessListEntry] {
         output.split(whereSeparator: \.isNewline).compactMap { line in
             let parts = line.split(
                 maxSplits: 2,
@@ -960,7 +1088,7 @@ enum OnlineGameLauncher {
         }
     }
 
-    private static func processIDsToInspect(
+    nonisolated private static func processIDsToInspect(
         from processList: String,
         rootProcessIdentifier: Int32?
     ) -> Set<Int32> {
@@ -986,7 +1114,7 @@ enum OnlineGameLauncher {
         return descendants
     }
 
-    private static func lsofOutput(for processIdentifiers: Set<Int32>) -> String {
+    nonisolated private static func lsofOutput(for processIdentifiers: Set<Int32>) -> String {
         guard !processIdentifiers.isEmpty else { return "" }
         return processOutput(
             executableURL: URL(fileURLWithPath: "/usr/sbin/lsof"),
@@ -999,7 +1127,7 @@ enum OnlineGameLauncher {
         )
     }
 
-    private static func processOutput(
+    nonisolated private static func processOutput(
         executableURL: URL,
         arguments: [String]
     ) -> String {
@@ -1020,7 +1148,7 @@ enum OnlineGameLauncher {
         }
     }
 
-    private static func classifyJX3Path(
+    nonisolated private static func classifyJX3Path(
         _ path: String,
         processIdentifier: Int32,
         launcherPIDs: inout Set<Int32>,
@@ -1029,7 +1157,7 @@ enum OnlineGameLauncher {
     ) {
         let lowercased = path.lowercased()
         if let requiredBottlePath,
-           !lowercased.contains(requiredBottlePath.lowercased()) {
+           !lowercased.contains(requiredBottlePath.lowercased() + "/") {
             return
         }
         if lowercased.contains(OnlineGameMode.jx3LauncherName.lowercased()) {
@@ -1040,7 +1168,7 @@ enum OnlineGameLauncher {
         }
     }
 
-    private static func readLaunchLog(
+    nonisolated private static func readLaunchLog(
         from url: URL,
         offset: UInt64
     ) -> LaunchLogRead {
@@ -1071,7 +1199,8 @@ enum OnlineGameLauncher {
         _ executableName: String,
         in bottleURL: URL,
         runtime: OnlineGameRuntimeKind,
-        crossOverAppPath: String?
+        crossOverAppPath: String?,
+        force: Bool = false
     ) throws {
         let launchTicket = runtime == .bundledWine ? try ArclumeWineStopService.launchTicket() : nil
         let process = Process()
@@ -1098,15 +1227,16 @@ enum OnlineGameLauncher {
             let wineURL = runtimeURL.appendingPathComponent("lib/wine/x86_64-unix/wine")
             guard FileManager.default.isExecutableFile(atPath: wineURL.path) else { return }
             process.executableURL = wineURL
+            environment["WINEDATADIR"] = runtimeURL.appendingPathComponent("share/wine").path
+            environment["WINEDLLPATH"] = runtimeURL.appendingPathComponent("lib/wine").path
+            environment["WINESERVER"] = runtimeURL.appendingPathComponent("bin/wineserver").path
             process.arguments = [
                 "C:\\windows\\system32\\taskkill.exe",
                 "/IM", executableName,
                 "/T"
             ]
-            environment["WINEDATADIR"] = runtimeURL.appendingPathComponent("share/wine").path
-            environment["WINEDLLPATH"] = runtimeURL.appendingPathComponent("lib/wine").path
-            environment["WINESERVER"] = runtimeURL.appendingPathComponent("bin/wineserver").path
         }
+        if force { process.arguments?.append("/F") }
         environment["WINEPREFIX"] = bottleURL.path
         environment["WINEDEBUG"] = "-all"
         process.environment = environment

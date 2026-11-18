@@ -161,6 +161,7 @@ extension LibraryPageGlobals {
     }
 
     func saveSnapshot(context: String) {
+        guard !ArclumeResetCoordinator.shared.isActive else { return }
         guard !ArclumeTestEnvironment.isTesting, let defaults = UserDefaults(suiteName: suiteName) else { return }
         LibrarySnapshot(context: context, games: games, records: scanRecords,
             metadata: gamesMeta.map(LibraryManifestRecord.init), folders: folders,

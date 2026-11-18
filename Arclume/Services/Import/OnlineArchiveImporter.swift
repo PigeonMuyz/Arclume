@@ -189,13 +189,36 @@ enum OnlineLauncherImporter {
         try preparePayload(from: sourceURL).launcherURL
     }
 
+    /// The welcome flow must never replace an existing install as a side effect
+    /// of choosing a folder. Files already inside this prefix are only detected.
+    static func installPreservingExisting(from sourceURL: URL, into bottleURL: URL) throws -> URL {
+        let source = sourceURL.resolvingSymlinksInPath().standardizedFileURL
+        let bottle = bottleURL.resolvingSymlinksInPath().standardizedFileURL
+        let drive = bottle.appendingPathComponent("drive_c", isDirectory: true)
+        if source.path.hasPrefix(drive.path + "/") {
+            if source.lastPathComponent.caseInsensitiveCompare(OnlineGameMode.jx3LauncherName) == .orderedSame,
+               (try? source.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true { return source }
+            return try findLauncher(in: source)
+        }
+        // Refuse ancestors (including the prefix/drive itself) before any move.
+        guard source != bottle, source != drive, !bottle.path.hasPrefix(source.path + "/") else {
+            throw OnlineArchiveImportError.launcherInstallFailed("请选择具体的 SeasunGame 文件夹。")
+        }
+        let destination = drive.appendingPathComponent("SeasunGame", isDirectory: true)
+        guard !FileManager.default.fileExists(atPath: destination.path),
+              !OnlineGameDiscovery.jx3Installation(in: bottle).isDetected else {
+            throw OnlineArchiveImportError.launcherInstallFailed("当前容器已有启动器或游戏文件，未覆盖。请使用已有项目。")
+        }
+        return try installLauncher(from: sourceURL, into: bottleURL, replacingExisting: false)
+    }
+
     /// Importing a launcher represents an already installed launcher. A
     /// selected folder is moved into C:\\SeasunGame inside the selected
     /// Bottle so a complete game is not duplicated. Single executables and
     /// extracted archives use a temporary staging copy, then the normal
     /// discovery pass surfaces the launcher card. Nothing is executed during
     /// import.
-    static func installLauncher(from sourceURL: URL, into bottleURL: URL) throws -> URL {
+    static func installLauncher(from sourceURL: URL, into bottleURL: URL, replacingExisting: Bool = true) throws -> URL {
         let payload = try preparePayload(from: sourceURL)
         defer {
             if let cleanupURL = payload.cleanupURL {
@@ -275,6 +298,11 @@ enum OnlineLauncherImporter {
             )
             hadExistingInstall = fileManager.fileExists(atPath: destinationRoot.path)
             if hadExistingInstall {
+                guard replacingExisting else {
+                    // Recheck after staging: another importer may have created it meanwhile.
+                    hadExistingInstall = false
+                    throw OnlineArchiveImportError.launcherInstallFailed("当前容器已出现启动器文件，未覆盖。")
+                }
                 try fileManager.moveItem(at: destinationRoot, to: backupRoot)
             }
 

@@ -56,13 +56,12 @@ def main():
                 tar.addfile(entry)
     specs = [
         ("runtime", "arclume-wine", runtime["id"], runtime["version"], SOURCE / runtime["archive"]["name"], False),
-        ("graphics", "d3dmetal", "d3dmetal3", "3", SOURCE / "d3dMetal3.tar.xz", False),
-        ("graphics", "d3dmetal", "d3dmetal4", "4-beta2", SOURCE / "d3dMetal4.tar.xz", False),
+        ("graphics", "d3dmetal", "d3dmetal4", "4-beta3", SOURCE / "d3dMetal4.tar.xz", False),
         ("graphics", "dxmt", "dxmt", "0.80", SOURCE / "dxmt.tar.gz", False),
         ("media", "gstreamer", "gstreamer", "1.28.1", SOURCE / "gstreamer-framework.tar.xz", False),
         ("fonts", "windows-fonts", "fonts", "2026.09", SOURCE / "fonts.tar.xz", False),
         ("graphics", "nvngx", "nvngx-jx3", "2026.09", SOURCE / "nvngx-jx3.tar.xz", False),
-        ("compatibility", "arclume-libs", "compatibility-libs", "2026.09.24", lib_archive, True),
+        ("compatibility", "arclume-libs", "compatibility-libs", "2026.11.16", lib_archive, True),
     ]
     components = []
     for component_type, name, identifier, version, archive, unpack in specs:

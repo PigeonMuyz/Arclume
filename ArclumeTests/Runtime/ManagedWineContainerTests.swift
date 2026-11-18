@@ -47,6 +47,25 @@ struct ManagedWineContainerTests {
         }
     }
 
+    @Test func removedRuntimePreferenceFallsBackWithoutChangingExistingData() throws {
+        try withRepository { repository in
+            let defaults = repository.defaults
+            let root = repository.root
+            defaults.set("metalSharp", forKey: WineRuntimeProvider.defaultsKey)
+            let legacy = WineRuntimeProvider.arclume.prefixURL(root: root)
+            let previous = root.appendingPathComponent("ExperimentalRuntimes/MetalSharp/Prefix/save.dat")
+            try FileManager.default.createDirectory(at: previous.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let data = Data("existing experiment".utf8)
+            try data.write(to: previous)
+
+            #expect(WineRuntimeProvider.selected(in: defaults) == .arclume)
+            #expect(try repository.containers()[0].provider == .arclume)
+            #expect(WineRuntimeProvider.provider(for: legacy, root: root, defaults: defaults) == .arclume)
+            #expect(WineRuntimeProvider.provider(for: previous.deletingLastPathComponent(), root: root, defaults: defaults) == nil)
+            #expect(try Data(contentsOf: previous) == data)
+        }
+    }
+
     @Test func displayNameNeverControlsPathsAndDuplicateNamesAreRejected() throws {
         try withRepository { repository in
             let item = try repository.create(name: "../../Display", provider: .arclume)

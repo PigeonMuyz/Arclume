@@ -3,8 +3,12 @@ import Combine
 
 @MainActor
 final class WindowsInstallerStore: ObservableObject {
-    @Published var busy = false
-    @Published var preparing = false
+    @Published var busy = false {
+        didSet { ArclumeResetCoordinator.setActivity(self, busy: busy || preparing) }
+    }
+    @Published var preparing = false {
+        didSet { ArclumeResetCoordinator.setActivity(self, busy: busy || preparing) }
+    }
     @Published var message: String?
     @Published var error: String?
     @Published var candidates: [InstalledProgramCandidate] = []

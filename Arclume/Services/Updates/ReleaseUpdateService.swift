@@ -180,8 +180,12 @@ final class ArclumeUpdateService: ObservableObject {
     @Published private(set) var latestApplicationRelease: ArclumeGitHubRelease?
     @Published private(set) var latestRuntimeRelease: ArclumeRuntimeRelease?
     @Published private(set) var isChecking = false
-    @Published private(set) var isDownloadingApplication = false
-    @Published private(set) var isUpdatingRuntime = false
+    @Published private(set) var isDownloadingApplication = false {
+        didSet { ArclumeResetCoordinator.setActivity(self, busy: isDownloadingApplication || isUpdatingRuntime) }
+    }
+    @Published private(set) var isUpdatingRuntime = false {
+        didSet { ArclumeResetCoordinator.setActivity(self, busy: isDownloadingApplication || isUpdatingRuntime) }
+    }
     @Published private(set) var applicationError: String?
     @Published private(set) var runtimeError: String?
     @Published private(set) var applicationDownloadMessage: String?

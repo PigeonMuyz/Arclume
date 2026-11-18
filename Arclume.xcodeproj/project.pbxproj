@@ -67,6 +67,7 @@
 			explicitFolders = (
 				Libs,
 				Resources/GameAdaptations,
+				Resources/GameMetalShaderTools,
 			);
 			path = Arclume;
 			sourceTree = "<group>";
@@ -472,7 +473,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 15;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 8JFR5LUFAJ;
 				ENABLE_APP_SANDBOX = NO;
@@ -506,7 +507,7 @@
 					"$(PROJECT_DIR)/Arclume/Libs/wine/x86_64-unix",
 					"$(PROJECT_DIR)/Arclume/Libs/d3dMetal4/external",
 				);
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.pigeonmuyz.arclume;
 				PRODUCT_MODULE_NAME = Arclume;
 				PRODUCT_NAME = Arclume;
@@ -541,7 +542,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 15;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 8JFR5LUFAJ;
 				ENABLE_APP_SANDBOX = NO;
@@ -575,7 +576,7 @@
 					"$(PROJECT_DIR)/Arclume/Libs/wine/x86_64-unix",
 					"$(PROJECT_DIR)/Arclume/Libs/d3dMetal4/external",
 				);
-				MARKETING_VERSION = 2.0;
+				MARKETING_VERSION = 2.1;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.pigeonmuyz.arclume;
 				PRODUCT_MODULE_NAME = Arclume;
 				PRODUCT_NAME = Arclume;

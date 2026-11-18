@@ -4,7 +4,9 @@ import Foundation
 @MainActor
 final class ManagedWineContainerStore: ObservableObject {
     @Published private(set) var containers: [ManagedWineContainer] = []
-    @Published private(set) var preparingID: String?
+    @Published private(set) var preparingID: String? {
+        didSet { ArclumeResetCoordinator.setActivity(self, busy: preparingID != nil) }
+    }
     @Published private(set) var progress: Double = 0
     @Published private(set) var message: String?
     @Published private(set) var error: String?
@@ -53,6 +55,16 @@ final class ManagedWineContainerStore: ObservableObject {
         defer { preparingID = nil; message = nil }
         do {
             let repository = repository
+            let item = try repository.initializationTarget(id: id)
+            let runtime = item.provider == .arclume ? BundledWineRuntime.installationURL : NefinitaRuntime.installationURL
+            guard BundledWineRuntime.isCurrentRuntime(at: runtime) else { throw ManagedContainerError.runtimeUnavailable }
+            try await WineMonoSupport.prepare(runtimeURL: runtime) { [weak self] fraction, label in
+                Task { @MainActor [weak self] in
+                    guard let self, self.preparingID == id else { return }
+                    self.progress = fraction
+                    self.message = label
+                }
+            }
             _ = try await Task.detached(priority: .userInitiated) { [weak self] in
                 return try BundledWineRuntime.prepareManagedContainer(id: id, repository: repository) { fraction, label in
                     Task { @MainActor [weak self] in

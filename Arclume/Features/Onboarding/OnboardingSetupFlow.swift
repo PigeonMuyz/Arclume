@@ -36,12 +36,13 @@ struct OnboardingSetupFlow: View {
             if !resourcesFinished {
                 resourcesStage
             } else if configuringJX3 && showJX3Installer {
-                WindowsInstallerView(title: "配置剑网3启动器", onboarding: true, onComplete: advance)
+                JX3LauncherImportView(prefix: BundledWineRuntime.standardSteamPrefixURL,
+                    onboarding: true, onComplete: advance)
             } else {
                 OnboardingStage(title: configuringJX3 ? "配置剑网3启动器" : "配置 Steam", showsBrand: true) {
                     VStack(spacing: 18) {
                         Text(installed ? "已安装，可以继续。" : configuringJX3
-                             ? "准备运行环境后，选择官网下载的 Windows 安装包。"
+                             ? "准备运行环境后，导入已有的 SeasunGame 文件夹、启动器文件或 ZIP。"
                              : "将 Steam 安装到统一运行环境，游戏库会自动扫描。")
                             .foregroundStyle(.secondary)
                         if busy {
@@ -67,7 +68,7 @@ struct OnboardingSetupFlow: View {
                     Button(installed && resourcesReady
                         ? "继续"
                         : resourcesReady
-                            ? (configuringJX3 ? "准备并选择安装包" : "安装 Steam")
+                            ? (configuringJX3 ? "准备并导入启动器" : "安装 Steam")
                             : "下载运行环境并继续") {
                         if installed && resourcesReady { advance() } else { prepare() }
                     }.buttonStyle(.glassProminent).disabled(busy).keyboardShortcut(.defaultAction)
@@ -80,7 +81,7 @@ struct OnboardingSetupFlow: View {
     private var resourcesStage: some View {
         OnboardingStage(title: isUpgrade ? "升级 Arclume" : "准备运行环境", showsBrand: true) {
             VStack(spacing: 24) {
-                RuntimeProviderPicker(store: resourceStore, showsDetails: false)
+                RuntimeProviderPicker(store: resourceStore, presentation: .onboarding)
                     .disabled(busy)
                 if busy || runtimePrepared {
                     ProgressView(value: runtimePrepared ? 1 : resourceStore.progress) {
@@ -97,7 +98,7 @@ struct OnboardingSetupFlow: View {
                     Label("隔离演示 · 下载和安装均为模拟", systemImage: "eye")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-            }.frame(maxWidth: 440)
+            }.frame(maxWidth: 520)
         } actions: {
             Button("稍后配置") { onFinish() }.buttonStyle(.glass).disabled(busy)
             Spacer()

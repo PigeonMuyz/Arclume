@@ -40,6 +40,13 @@ struct LibraryPage: View {
     @State private var launcherTitle = "Arclume"
     @StateObject private var tourRegistry = LauncherTourRegistry()
     @State private var onboardingSetup: (steam: Bool, jx3: Bool)?
+    @ObservedObject private var runtimeResources = DownloadableResourceStore.shared
+    @State private var pendingShaderGame: Game?
+    @State private var shadersForGame: Game?
+    @State private var pendingShaderCount = 0
+    @State private var showShaderSuggestion = false
+    @State private var didOfferShaderOptimization = false
+    @State private var checkingShaders = false
     
     var body: some View {
         ZStack {
@@ -111,7 +118,8 @@ struct LibraryPage: View {
                             .foregroundStyle(.white)
                     }
                 } else {
-                    LauncherLibraryView(selectedTitle: $launcherTitle, onLaunchJX3: launchJX3Game, onStopJX3: forceQuitJX3Game,
+                    LauncherLibraryView(selectedTitle: $launcherTitle, onLaunchJX3: { launchJX3Game($0) },
+                                        onStopJX3: forceQuitJX3Game,
                                         showingTour: showUnifiedOnboarding)
                 }
             }
@@ -135,6 +143,18 @@ struct LibraryPage: View {
                     isPresented: $showOnlineRuntimeUpdate,
                     load: load
                 )
+            }
+            .sheet(item: $shadersForGame) { game in
+                if let prefix = game.installedBottleURL {
+                    GameShaderOptimizationView(gameID: game.id, prefix: prefix,
+                        executableName: shaderExecutable(for: game), launcherURL: game.appExeURL, library: libraryPageGlobals)
+                }
+            }
+            .alert("可以提前优化着色器", isPresented: $showShaderSuggestion) {
+                Button("现在优化") { shadersForGame = pendingShaderGame }
+                Button("稍后", role: .cancel) { }
+            } message: {
+                Text("\(pendingShaderGame?.name ?? "游戏") 有 \(pendingShaderCount) 份已记录着色器尚未在当前 Mac 上预优化。可在开始游戏前处理。")
             }
             .alert(
                 "无法启动剑网3",
@@ -268,7 +288,9 @@ struct LibraryPage: View {
             .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
                 libraryPageGlobals.refreshLocalProgramAvailability()
                 if Date().timeIntervalSince(lastScan) > 30 { Task { await load() } }
+                Task { await checkPendingShaders() }
             }
+            .task(id: libraryPageGlobals.allGames.map(\.id)) { await checkPendingShaders() }
             .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { _ in
                 if NSApplication.shared.isActive && !scanInProgress { Task { await load() } }
             }
@@ -370,7 +392,9 @@ struct LibraryPage: View {
 
     @MainActor
     private func load() async {
-        guard !isDebugFixtureRequested else { return }
+        guard !isDebugFixtureRequested, !ArclumeResetCoordinator.shared.isActive else { return }
+        let resetActivity = ArclumeResetCoordinator.beginActivity()
+        defer { ArclumeResetCoordinator.endActivity(resetActivity) }
         if OnlineGameMode.isEnabled {
             await loadOnlineGames()
             return
@@ -527,6 +551,9 @@ struct LibraryPage: View {
         progress = 100
 
         metadataRefreshTask = Task(priority: .utility) {
+            guard !ArclumeResetCoordinator.shared.isActive else { return }
+            let resetActivity = ArclumeResetCoordinator.beginActivity()
+            defer { ArclumeResetCoordinator.endActivity(resetActivity) }
             await libraryPageGlobals.refreshGameDBMetadata()
             guard generation == loadGeneration, !Task.isCancelled else { return }
             do {
@@ -600,6 +627,36 @@ struct LibraryPage: View {
     }
 
     @MainActor
+    private func shaderExecutable(for game: Game) -> String {
+        OnlineGameMode.isJX3(game) ? OnlineGameMode.jx3ClientName : (game.appExeURL?.lastPathComponent ?? "Steam.exe")
+    }
+
+    private func checkPendingShaders() async {
+        guard !ArclumeTestEnvironment.isTesting, !checkingShaders, !didOfferShaderOptimization, !showUnifiedOnboarding,
+              onboardingSetup == nil, !libraryPageGlobals.isLaunchingGame, libraryPageGlobals.playingID == nil,
+              runtimeResources.activeProvider == .arclume, GameMetalShaderCache.toolsAvailable else { return }
+        checkingShaders = true
+        defer { checkingShaders = false }
+        for game in libraryPageGlobals.allGames where game.isInstalled && !game.isNative {
+            guard let prefix = game.installedBottleURL else { continue }
+            let key = namespacedKey("GameOptions", OnlineGameMode.gameOptionsIdentifier(for: game))
+            let options: GameOptionsData? = readUsrDefData(key: key)
+            guard options?.cxGraphicsBackend == "dxmt" else { continue }
+            let state = try? await GameMetalShaderCache.snapshot(prefix: prefix, gameID: game.id, executable: shaderExecutable(for: game))
+            var count = state?.pending ?? 0
+            if let root = GameDXBCPrecompile.gameRoot(gameID: game.id, launcher: game.appExeURL) {
+                count += (try? await GameDXBCPrecompile.pendingCount(gameRoot: root, prefix: prefix, gameID: game.id)) ?? 0
+            }
+            guard count > 0, !Task.isCancelled, !didOfferShaderOptimization,
+                  !libraryPageGlobals.isLaunchingGame, libraryPageGlobals.playingID == nil else { continue }
+            pendingShaderCount = count
+            pendingShaderGame = game
+            didOfferShaderOptimization = true
+            showShaderSuggestion = true
+            return
+        }
+    }
+
     private func launchJX3Game(_ game: Game) {
         guard !libraryPageGlobals.isLaunchingGame, !libraryPageGlobals.isStoppingWine else { return }
 

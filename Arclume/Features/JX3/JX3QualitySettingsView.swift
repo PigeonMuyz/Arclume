@@ -47,7 +47,7 @@ private enum JX3QualitySettingsError: LocalizedError, Sendable {
     var errorDescription: String? {
         switch self {
         case .configNotFound:
-            "未找到当前 Games 容器中的 config.ini，画质设置未写入。"
+            "尚未找到剑网3客户端的 config.ini，请先在启动器中完成游戏下载并运行一次游戏。"
         case .writeNotConfirmed:
             "无法确认 config.ini 已写入，画质设置未标记为成功。"
         }
@@ -57,94 +57,6 @@ private enum JX3QualitySettingsError: LocalizedError, Sendable {
 private enum JX3ModelEdition: String, Sendable {
     case handDrawn
     case flagship
-
-    var title: String {
-        switch self {
-        case .handDrawn:
-            "手绘版模型"
-        case .flagship:
-            "旗舰版模型"
-        }
-    }
-
-    var symbolName: String {
-        switch self {
-        case .handDrawn:
-            "pencil"
-        case .flagship:
-            "sparkles"
-        }
-    }
-
-}
-
-private struct JX3OfficialQualityPreset: Identifiable {
-    let id: String
-    let title: String
-    let resourceName: String
-
-    var modelEdition: JX3ModelEdition {
-        switch id {
-        case "zuijian", "jianyue", "junheng":
-            .handDrawn
-        default:
-            .flagship
-        }
-    }
-
-    var modelEditionTitle: String {
-        modelEdition.title
-    }
-
-    var verticalTitle: String {
-        title.map { String($0) }.joined(separator: "\n")
-    }
-
-    var modelSymbolName: String {
-        modelEdition.symbolName
-    }
-
-    var usesHandDrawnModels: Bool {
-        modelEdition == .handDrawn
-    }
-
-    static let all: [JX3OfficialQualityPreset] = [
-        JX3OfficialQualityPreset(
-            id: "zuijian",
-            title: "最简",
-            resourceName: "config_bd_1_zuijian.ini"
-        ),
-        JX3OfficialQualityPreset(
-            id: "jianyue",
-            title: "简约",
-            resourceName: "config_bd_2_jianyue.ini"
-        ),
-        JX3OfficialQualityPreset(
-            id: "junheng",
-            title: "标准",
-            resourceName: "config_bd_3_junheng.ini"
-        ),
-        JX3OfficialQualityPreset(
-            id: "gaoxiao",
-            title: "高效",
-            resourceName: "config_5_gaoxiao.ini"
-        ),
-        JX3OfficialQualityPreset(
-            id: "dianying",
-            title: "电影",
-            resourceName: "config_bd_6_dianying.ini"
-        ),
-        JX3OfficialQualityPreset(
-            id: "jizhi",
-            title: "极致",
-            resourceName: "config_bd_7_jizhi.ini"
-        ),
-        JX3OfficialQualityPreset(
-            id: "tansuo",
-            title: "探索",
-            resourceName: "config_bd_7_tansuo.ini"
-        )
-    ]
 }
 
 private enum JX3QualitySection: CaseIterable, Hashable, Identifiable {
@@ -181,6 +93,7 @@ struct JX3QualitySettingsView: View {
     @State private var selectedSection: JX3QualitySection = .performance
     @State private var isApplying = false
     @State private var isLoadingSettings = true
+    @State private var hasGameConfig = false
     @State private var autoApplyTask: Task<Void, Never>?
     @State private var statusMessage: String?
     @State private var errorMessage: String?
@@ -203,11 +116,9 @@ struct JX3QualitySettingsView: View {
     var body: some View {
         ScrollView(.vertical) {
             VStack(alignment: .leading, spacing: 12) {
-                officialPresetCard
-
                 if isLoadingSettings {
                     settingsLoadingState
-                } else {
+                } else if hasGameConfig {
                     sectionPicker
                     qualitySection(selectedSection)
                         .disabled(isApplying || bottleURL == nil)
@@ -235,8 +146,7 @@ struct JX3QualitySettingsView: View {
             }
             .padding(.vertical, 12)
         }
-        .frame(width: 620, alignment: .topLeading)
-        .frame(height: 650, alignment: .topLeading)
+        .frame(width: 760, height: 520, alignment: .topLeading)
         .controlSize(.small)
         .task {
             await reloadSettings()
@@ -247,7 +157,7 @@ struct JX3QualitySettingsView: View {
         .onDisappear {
             autoApplyTask?.cancel()
             // Closing within the debounce window must not discard the last edit.
-            if !isLoadingSettings, !isApplying, settings != savedSettings, let bottleURL {
+            if hasGameConfig, !isLoadingSettings, !isApplying, settings != savedSettings, let bottleURL {
                 let pendingSettings = settings
                 Task { @MainActor in
                     await applyCurrentSettings(pendingSettings, in: bottleURL)
@@ -438,7 +348,7 @@ struct JX3QualitySettingsView: View {
                     HStack {
                         Text("物件细节")
                         Spacer()
-                        Text("跟随预设").foregroundStyle(.secondary)
+                        Text("由游戏控制").foregroundStyle(.secondary)
                     }
                     .help("尚未确认独立配置键；不会再将物件细节写入整体画质档位 nEngineGraphicsLevel。")
                     pickerRow("地形烘焙", selection: $settings.terrainBakeScaleRate) {
@@ -580,53 +490,6 @@ struct JX3QualitySettingsView: View {
                 }
             }
         }
-    }
-
-    private var officialPresetCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .center, spacing: 12) {
-                Label("官方预设", systemImage: "slider.horizontal.3")
-                    .font(.headline)
-                    .foregroundStyle(.white)
-
-                Spacer(minLength: 8)
-
-                HStack(spacing: 10) {
-                    Label("手绘版模型", systemImage: "pencil")
-                        .foregroundStyle(.white.opacity(0.56))
-                    Label("旗舰版模型", systemImage: "sparkles")
-                        .foregroundStyle(.arclumeSecondary)
-                }
-                .font(.caption.weight(.medium))
-                Button {
-                    restoreArclumePreset()
-                } label: {
-                    Label("恢复作者推荐预设", systemImage: "arrow.counterclockwise")
-                        .font(.footnote.weight(.medium))
-                        .padding(.horizontal, 9)
-                        .padding(.vertical, 6)
-                        .background(
-                            .white.opacity(0.06),
-                            in: Capsule(style: .continuous)
-                        )
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.arclumeSecondary)
-            }
-
-            officialPresetButtons
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            .arclumeAccent.mix(with: .black, by: 0.66).opacity(0.78),
-            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(.white.opacity(0.06), lineWidth: 1)
-        }
-        .disabled(isApplying || isLoadingSettings || bottleURL == nil)
     }
 
     private func settingsCard<Content: View>(
@@ -825,49 +688,6 @@ struct JX3QualitySettingsView: View {
         )
     }
 
-    private var officialPresetButtons: some View {
-        HStack(spacing: 10) {
-            ForEach(JX3OfficialQualityPreset.all) { preset in
-                Button {
-                    applyOfficialPreset(preset)
-                } label: {
-                    VStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        Text(preset.verticalTitle)
-                            .font(.title3.weight(.semibold))
-                            .multilineTextAlignment(.center)
-                            .lineSpacing(1)
-                            .foregroundStyle(.white.opacity(0.92))
-                        Spacer(minLength: 6)
-                        Image(systemName: preset.modelSymbolName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(
-                                preset.usesHandDrawnModels
-                                    ? .white.opacity(0.52)
-                                    : .arclumeSecondary
-                            )
-                            .help(preset.modelEditionTitle)
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 100)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 10)
-                    .background(
-                        .white.opacity(0.055),
-                        in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(.white.opacity(0.07), lineWidth: 1)
-                    }
-                    .accessibilityLabel("\(preset.title)，\(preset.modelEditionTitle)")
-                }
-                .buttonStyle(.plain)
-                .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-        }
-    }
-
-
     private func integerString(_ value: Double) -> String {
         String(Int(value.rounded()))
     }
@@ -879,8 +699,14 @@ struct JX3QualitySettingsView: View {
             return
         }
 
-        let configURL = JX3ConfigPresetImporter.configURL(in: bottleURL)
+        let configURL = JX3GameConfiguration.configURL(in: bottleURL)
         isLoadingSettings = true
+        hasGameConfig = false
+        guard FileManager.default.isReadableFile(atPath: configURL.path) else {
+            isLoadingSettings = false
+            errorMessage = JX3QualitySettingsError.configNotFound.localizedDescription
+            return
+        }
 
         let loadedSettings = await Task.detached(priority: .userInitiated) {
             JX3QualityConfigValues(configURL: configURL)
@@ -894,12 +720,13 @@ struct JX3QualitySettingsView: View {
             fallbackFor: bottleURL
         )
         isLoadingSettings = false
+        hasGameConfig = true
         statusMessage = nil
         errorMessage = nil
     }
 
     private func scheduleAutoApply() {
-        guard !isLoadingSettings, !isApplying, let bottleURL else {
+        guard hasGameConfig, !isLoadingSettings, !isApplying, let bottleURL else {
             return
         }
 
@@ -927,7 +754,7 @@ struct JX3QualitySettingsView: View {
         defer { isApplying = false }
 
         do {
-            let configURL = JX3ConfigPresetImporter.configURL(in: bottleURL)
+            let configURL = JX3GameConfiguration.configURL(in: bottleURL)
             let updates = pendingSettings.updates(comparedTo: savedSettings)
             guard !updates.isEmpty else { return }
             let confirmedSettings = try await Task.detached(priority: .utility) {
@@ -958,72 +785,6 @@ struct JX3QualitySettingsView: View {
         }
     }
 
-    private func applyOfficialPreset(_ preset: JX3OfficialQualityPreset) {
-        guard let sourceURL = JX3ConfigPresetImporter.officialPresetURL(
-            named: preset.resourceName,
-            in: bottleURL
-        ) else {
-            errorMessage = "App 内未找到官方 \(preset.title) 画质预设。"
-            statusMessage = nil
-            return
-        }
-        applyPreset(
-            from: sourceURL,
-            displayName: preset.title,
-            modelEdition: preset.modelEdition
-        )
-    }
-
-    private func restoreArclumePreset() {
-        guard let sourceURL = BundledOnlineGameResources.resourceURL(
-            named: JX3ConfigPresetImporter.recommendedConfigResourceName
-        ) else {
-            errorMessage = "App 内未找到 Arclume 内置画质预设。"
-            statusMessage = nil
-            return
-        }
-        applyPreset(
-            from: sourceURL,
-            displayName: "Arclume 内置画质预设",
-            modelEdition: .flagship
-        )
-    }
-
-    private func applyPreset(
-        from sourceURL: URL,
-        displayName: String,
-        modelEdition: JX3ModelEdition
-    ) {
-        guard !isApplying else { return }
-        autoApplyTask?.cancel()
-        guard let bottleURL else {
-            errorMessage = "请先选择剑网3使用的 Bottle。"
-            statusMessage = nil
-            return
-        }
-
-        isApplying = true
-        statusMessage = nil
-        errorMessage = nil
-        defer { isApplying = false }
-
-        do {
-            let result = try JX3ConfigPresetImporter.importPreset(
-                from: sourceURL,
-                into: bottleURL
-            )
-            settings = JX3QualityConfigValues(configURL: result.configURL)
-            savedSettings = settings
-            self.modelEdition = modelEdition
-            storeModelEdition(modelEdition, for: bottleURL)
-            isLoadingSettings = false
-
-            statusMessage = "已应用 \(displayName)。"
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
     private func configuredModelEdition(
         at configURL: URL,
         fallbackFor bottleURL: URL
@@ -1037,10 +798,6 @@ struct JX3QualitySettingsView: View {
         return UserDefaults.standard.string(forKey: modelEditionDefaultsKey(for: bottleURL))
             .flatMap(JX3ModelEdition.init(rawValue:))
             ?? .flagship
-    }
-
-    private func storeModelEdition(_ edition: JX3ModelEdition, for bottleURL: URL) {
-        UserDefaults.standard.set(edition.rawValue, forKey: modelEditionDefaultsKey(for: bottleURL))
     }
 
     private func modelEditionDefaultsKey(for bottleURL: URL) -> String {

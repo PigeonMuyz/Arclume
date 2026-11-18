@@ -23,7 +23,7 @@ nonisolated struct JX3INIReader: Sendable {
 
         var parsed: [JX3INIKey: String] = [:]
         var section = ""
-        let contents = String(decoding: data, as: UTF8.self)
+        let contents = JX3INIText(data: data)?.contents ?? String(decoding: data, as: UTF8.self)
         for rawLine in contents.components(separatedBy: .newlines) {
             let line = rawLine.trimmingCharacters(
                 in: .whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}"))

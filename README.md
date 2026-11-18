@@ -1,6 +1,6 @@
 # Arclume
 
-> Arclume 2.0 · 全新 UI 设计，为 Mac 打造的统一游戏启动器。
+> Arclume 2.1 · 为 Mac 打造的统一游戏启动器。
 
 [简体中文](#简体中文) · [English](#english)
 
@@ -18,7 +18,8 @@ Arclume 用一个本地游戏库管理 macOS 原生游戏、Steam 原生游戏�
 - **统一运行环境**：Windows 应用使用 `Application Support/Arclume/ALBottles`；旧版容器通过应用内升级流程迁移。Steam 和剑网3启动器均可选配置。
 - **新的设置与项目编辑**：管理运行选项，匹配 Steam、App Store 等来源的名称、简介、背景与标志；优先采用当前应用语言的资料。
 - **首次使用引导**：全窗口欢迎页、真实功能区域的箭头指引，以及可选的迁移与初始化流程。
-- **按需运行组件**：D3DMetal 3 / 4、DXVK、msync、Metal HUD；运行环境按 App 的固定组件清单下载和校验。
+- **按需运行组件**：Arclume Runtime 支持 D3DMetal 4 Beta 3 与 DXMT 0.80，并按 App 的固定组件清单下载和校验。兼容设置包含 DXVK、msync 和 Metal 性能面板。
+- **DXMT 着色器优化**：可提前处理剑网 3 的着色器和外置缓存，支持调整处理线程数和继续已保存的进度。
 
 ![已安装应用启动台](docs/screenshots/launchpad-2.0.png)
 
@@ -118,7 +119,8 @@ Arclume is an independent, community-driven macOS game launcher. It manages nati
 - Automatic discovery of installed native and Steam games, with cached startup and background refresh across multiple Steam libraries.
 - A unified ALBottles environment with an in-app legacy migration flow. Steam and JX3 setup are optional.
 - Redesigned settings, project editing, localized Steam/App Store metadata matching, artwork, and guided onboarding.
-- An independently versioned Arclume Wine Runtime with D3DMetal 3/4, DXVK, msync and Metal HUD.
+- An independently versioned Arclume Wine Runtime with D3DMetal 4 Beta 3, DXMT 0.80, DXVK, msync and Metal HUD.
+- DXMT shader optimization for JX3 with external cache support, adjustable worker counts, and saved progress.
 - Application update checks and an App-pinned component catalog, with explicit downloads during setup or from runtime settings.
 
 ### Requirements

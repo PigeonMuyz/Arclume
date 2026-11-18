@@ -28,6 +28,9 @@ enum BundledOnlineGameResources {
     static let chineseFontName = "NotoSansCJKsc-Regular.otf"
     static let nvngxArchiveName = "nvngx-jx3.tar.xz"
     static let nvngxFileNames = ["nvngx_dlss.dll", "nvngx_dlssg.dll"]
+    static let d3dMetalReleaseVersion = "4.0b3"
+    static let dxmtVersion = "0.80"
+    static let dxmtArchiveName = "dxmt.tar.gz"
     private static let materializationLock = NSLock()
     /// Retain the active app build's extraction plus one previous build, so a
     /// running game is not left with a removed D3DMetal path while repeated
@@ -69,7 +72,14 @@ enum BundledOnlineGameResources {
         let components = name.split(separator: "/", omittingEmptySubsequences: true)
         guard let firstComponent = components.first else { return nil }
         let first = String(firstComponent)
-        guard first == "d3dMetal3" || first == "d3dMetal4" else { return nil }
+        if first == "dxmt" {
+            let archive = try requiredResource(named: dxmtArchiveName)
+            let extracted = try materializedArchiveRoot(archive, cacheName: "dxmt-\(dxmtVersion)")
+            let root = extracted.appendingPathComponent("v\(dxmtVersion)", isDirectory: true)
+            try validateDXMT(at: root)
+            return root
+        }
+        guard first == "d3dMetal4" else { return nil }
 
         let version = String(first.dropFirst("d3dMetal".count))
         let root = try d3dMetalResourceRoot(version: version)
@@ -86,6 +96,36 @@ enum BundledOnlineGameResources {
 
     static func d3dMetalArchiveName(version: String) -> String {
         "d3dMetal\(version).tar.xz"
+    }
+
+    static func validateDXMT(at root: URL) throws {
+        let required = [
+            "x86_64-windows/d3d11.dll", "x86_64-windows/dxgi.dll",
+            "x86_64-windows/d3d10core.dll", "x86_64-windows/winemetal.dll",
+            "i386-windows/d3d11.dll", "i386-windows/dxgi.dll",
+            "i386-windows/d3d10core.dll", "i386-windows/winemetal.dll",
+            "x86_64-unix/winemetal.so"
+        ]
+        guard required.allSatisfy({ relative in
+            let file = root.appendingPathComponent(relative)
+            return file.resolvingSymlinksInPath().path.hasPrefix(root.resolvingSymlinksInPath().path + "/")
+                && (try? file.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }) else { throw BundledOnlineGameResourceError.invalidArchive("DXMT \(dxmtVersion)") }
+    }
+
+    static func validateD3DMetalVersion(at root: URL) throws {
+        let infoURL = root.appendingPathComponent(
+            "external/D3DMetal.framework/Resources/Info.plist"
+        )
+        guard let data = try? Data(contentsOf: infoURL),
+              let info = try? PropertyListSerialization.propertyList(
+                from: data, format: nil
+              ) as? [String: Any],
+              info["CFBundleShortVersionString"] as? String == d3dMetalReleaseVersion,
+              info["CFBundleVersion"] as? String == d3dMetalReleaseVersion
+        else {
+            throw BundledOnlineGameResourceError.invalidArchive("D3DMetal 4 Beta 3")
+        }
     }
 
     /// Replaces the two game-side DLSS DLLs in the JX3 `bin64` runtime

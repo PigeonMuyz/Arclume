@@ -7,7 +7,7 @@ nonisolated struct JX3LauncherArtwork: Codable, Equatable {
     let logoData: Data?
     let logoURL: URL?
 
-    static let pageURL = URL(string: "i")!
+    static let pageURL = URL(string: "https://jx3xlauncher.xoyocdn.com/v2/uiweb/jx3.html")!
 
     static func parse(html: String) -> Self? {
         var background: URL?

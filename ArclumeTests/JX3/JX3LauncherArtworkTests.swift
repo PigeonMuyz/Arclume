@@ -3,6 +3,11 @@ import Testing
 @testable import Arclume
 
 struct JX3LauncherArtworkTests {
+    @Test func launcherPageIsAnAbsoluteOfficialHTTPSURL() {
+        #expect(JX3LauncherArtwork.pageURL.scheme == "https")
+        #expect(JX3LauncherArtwork.pageURL.host == "jx3xlauncher.xoyocdn.com")
+        #expect(JX3LauncherArtwork.pageURL.path == "/v2/uiweb/jx3.html")
+    }
     private let background = "https://jx3-capi.xoyocdn.com/uploadfile/background.jpg"
 
     @Test func releaseBackgroundIsNotCarouselOrTestServerArtwork() throws {

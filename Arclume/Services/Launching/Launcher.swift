@@ -12,9 +12,8 @@ func closeWineActivities() async throws {
         // Game termination observers can run while the toolbar stop is draining.
         // They must not fall through to the legacy global CrossOver sweep.
         guard !ArclumeWineStopService.isStopping else { return }
-        let root = BundledWineRuntime.installationURL.deletingLastPathComponent()
         try await Task.detached(priority: .userInitiated) {
-            try await ArclumeWineStopService.stop(runtimeRoot: root)
+            try await ArclumeWineStopService.stopManagedRuntimes()
         }.value
         return
     }
@@ -188,14 +187,15 @@ private func applyWindowsInputOptions(to bottleURL: URL, options: GameOptions) t
     try registry.save()
 }
 
-func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, steamExePath: String, options: GameOptions? = nil, appExeURL: URL? = nil, installedRuntimeKind: String? = nil) async throws -> Void {
+func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, steamExePath: String, options: GameOptions? = nil, appExeURL: URL? = nil, installedRuntimeKind: String? = nil, shaderGameID: String? = nil) async throws -> Void {
     console.log("options: \(options.debugDescription)")
     guard let options else { throw CocoaError(.fileNoSuchFile) }
     guard let bottleURL = OnlineGameDiscovery.selectedBottleURL(from: selectedBottle) else {
         throw CocoaError(.fileNoSuchFile)
     }
     guard installedRuntimeKind != StandardGameRuntimeKind.crossOver.rawValue,
-          BundledWineRuntime.ownsStandardSteamPrefix(bottleURL) || BundledWineRuntime.ownsPrefix(bottleURL) else {
+          BundledWineRuntime.ownsStandardSteamPrefix(bottleURL)
+              || BundledWineRuntime.ownsPrefix(bottleURL) else {
         throw NSError(domain: "Arclume.Runtime", code: 1,
             userInfo: [NSLocalizedDescriptionKey: BundledRuntimePolicy.retiredMessage])
     }
@@ -211,8 +211,13 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
                 userInfo: [NSLocalizedDescriptionKey: BundledRuntimePolicy.retiredMessage])
         }
     }
-    if (installedRuntimeKind.flatMap(StandardGameRuntimeKind.init(rawValue:)) ?? StandardGameRuntimeKind.selected()) == .bundledWine {
+    if (installedRuntimeKind.flatMap(StandardGameRuntimeKind.init(rawValue:))
+        ?? StandardGameRuntimeKind.selected()) == .bundledWine {
         let launchTicket = try ArclumeWineStopService.launchTicket()
+        if options.cxGraphicsBackend == "dxmt", let shaderGameID {
+            try await GameMetalShaderCache.prepare(prefix: bottleURL, gameID: shaderGameID,
+                                                   executable: appExeURL?.lastPathComponent ?? "Steam.exe")
+        }
         try await WineWarmupService.shared.prepareForLaunch(prefix: bottleURL, wineMSync: options.wineMSync)
         guard (BundledWineRuntime.ownsStandardSteamPrefix(bottleURL)
                || (appExeURL != nil && BundledWineRuntime.ownsPrefix(bottleURL))),
@@ -225,6 +230,10 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
         var environment = configuration.environment
         environment["WINEPREFIX"] = bottleURL.path
         environment = GameAdaptationRules.processEnvironment(environment, executable: appExeURL, bottle: bottleURL)
+        if configuration.environment["CX_ACTIVE_GRAPHICS_BACKEND"] == "dxmt", let shaderGameID {
+            try GameMetalShaderCache.configure(environment: &environment, prefix: bottleURL, gameID: shaderGameID,
+                                               executable: appExeURL?.lastPathComponent ?? "Steam.exe")
+        }
         let steamBootOptions = [
             "-nochatui", "-nofriendsui", "-silent", "-no-browser",
             "-no-cef-sandbox", "-skipinitialbootstrap"
@@ -239,7 +248,9 @@ func launchWindowsGame(id: String, cxAppPath: String?, selectedBottle: String, s
         let normalArguments = appExeURL == nil
             ? [target] + steamBootOptions + ["-applaunch", id] + extraArguments
             : (appExeURL?.pathExtension.lowercased() == "lnk" ? ["start.exe", "/unix", target] : [target]) + extraArguments
-        let supportedArguments = try YYLaunchSupport.arguments(executable: appExeURL, bottle: bottleURL, userArguments: extraArguments)
+        let supportedArguments = try YYLaunchSupport.arguments(
+            executable: appExeURL, bottle: bottleURL, userArguments: extraArguments
+        )
         let arguments = supportedArguments ?? normalArguments
         if supportedArguments != nil {
             // The helper owns YY's Windows process tree; do not name the helper

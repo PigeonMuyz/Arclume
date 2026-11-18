@@ -19,9 +19,14 @@ struct GameHeader: View {
     @EnvironmentObject var gameOptions: GameOptions
     @EnvironmentObject var compatibilityStore: GameCompatibilityStore
     @EnvironmentObject var nativeRuntimeStore: NativeAppRuntimeStore
+    @ObservedObject private var runtimeResources = DownloadableResourceStore.shared
+    @AppStorage(OnlineGameRuntimeKind.defaultsKey, store: UserDefaults(suiteName: suiteName))
+    private var onlineRuntime: OnlineGameRuntimeKind = .crossOver
     @State private var showGameOptions: Bool = false
     @State private var showEditor = false
     @State private var showQuality = false
+    @State private var showShaderOptimization = false
+    @State private var shaderSnapshot: GameMetalShaderCache.Snapshot?
     @State private var gameToUninstall: Game?
     @State private var iconAccent = Color.accentColor
     var isPlaying: Bool {
@@ -59,6 +64,25 @@ struct GameHeader: View {
         guard let game, game.supportsCrossOverCompatibility else { return false }
         return compatibilityStore.profile(for: game).crossOverStatus == .supported
     }
+
+    private var gameOptionsKey: String? {
+        game.map { namespacedKey("GameOptions", OnlineGameMode.gameOptionsIdentifier(for: $0)) }
+    }
+
+    private var supportsShaderOptimization: Bool {
+        guard let game, !game.isNative, game.isInstalled, game.downloadProgress == 100 else { return false }
+        return runtimeResources.activeProvider == .arclume && gameOptions.cxGraphicsBackend == "dxmt"
+            && game.installedBottleURL != nil
+    }
+
+    private var shaderExecutable: String {
+        guard let game else { return "" }
+        return OnlineGameMode.isJX3(game) ? OnlineGameMode.jx3ClientName : (game.appExeURL?.lastPathComponent ?? "Steam.exe")
+    }
+
+    private var shaderSnapshotKey: String {
+        "\(gameOptionsKey ?? "")/\(gameOptions.cxGraphicsBackend)/\(libraryPageGlobals.playingID ?? "")/\(libraryPageGlobals.shaderOptimizationRevision)"
+    }
     
     var body: some View {
         Group {
@@ -83,9 +107,25 @@ struct GameHeader: View {
         }
         .sheet(isPresented: $showQuality) {
             Modal("剑网3画质设置", showModal: $showQuality, scrollable: false) {
-                JX3QualitySettingsView(bottleURL: OnlineGameMode.jx3BottleURL(appGlobals: appGlobals))
-                    .frame(width: 760, height: 520)
+                JX3QualitySettingsView(bottleURL: game?.installedBottleURL
+                    ?? OnlineGameMode.jx3BottleURL(appGlobals: appGlobals))
             }
+        }
+        .sheet(isPresented: $showShaderOptimization) {
+            if let game, let prefix = game.installedBottleURL {
+                GameShaderOptimizationView(gameID: game.id, prefix: prefix,
+                                           executableName: shaderExecutable, launcherURL: game.appExeURL, library: libraryPageGlobals)
+            }
+        }
+        .task(id: shaderSnapshotKey) {
+            shaderSnapshot = nil
+            guard supportsShaderOptimization, !isPlaying, let game, let prefix = game.installedBottleURL else { return }
+            let snapshot = try? await GameMetalShaderCache.snapshot(prefix: prefix, gameID: game.id, executable: shaderExecutable)
+            if !Task.isCancelled { shaderSnapshot = snapshot }
+        }
+        .onChange(of: gameOptionsKey, initial: true) {
+            guard let gameOptionsKey else { return }
+            gameOptions.set(data: GameOptionsPersistence.read(key: gameOptionsKey))
         }
         .background {
             if let game {
@@ -96,6 +136,24 @@ struct GameHeader: View {
     }
 
     private var launcherControls: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if supportsShaderOptimization, let pending = shaderSnapshot?.pending, pending > 0,
+               !isPlaying && !libraryPageGlobals.isLaunchingGame {
+                Button { showShaderOptimization = true } label: {
+                    Label("有 \(pending) 份已记录着色器可提前优化。", systemImage: "sparkles")
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .help("查看着色器优化步骤")
+                .accessibilityIdentifier("launcher.shaderPrewarmReminder")
+            }
+            launcherActions
+        }
+    }
+
+    private var launcherActions: some View {
         HStack(spacing: 10) {
             Button {
                 if isPlaying {
@@ -134,6 +192,12 @@ struct GameHeader: View {
                 if let game, OnlineGameMode.isJX3(game) {
                     Divider()
                     Button { showQuality = true } label: { Label("画质设置", systemImage: "display") }
+                    if supportsShaderOptimization {
+                        Button { showShaderOptimization = true } label: {
+                            Label("优化着色器…", systemImage: "sparkles")
+                        }
+                        .accessibilityIdentifier("launcher.optimizeShaders")
+                    }
                 }
                 if let game, game.isCustom == true, !game.isNative {
                     Divider()
@@ -261,16 +325,13 @@ struct GameHeader: View {
 
     @MainActor
     func playGame() {
-        guard !isPlaying, !libraryPageGlobals.isStoppingWine else { return }
+        guard let game, let gameOptionsKey, !isPlaying, !libraryPageGlobals.isStoppingWine else { return }
+        let gameOptions = GameOptions()
+        gameOptions.set(data: GameOptionsPersistence.read(key: gameOptionsKey))
         libraryPageGlobals.setLoader(state: true)
         Task {
             do {
-                let id = OnlineGameMode.gameOptionsIdentifier(for: game!)
-                let gameOptKey = namespacedKey("GameOptions", id)
-                if let data: GameOptionsData = readUsrDefData(key: gameOptKey) {
-                    gameOptions.set(data: data)
-                }
-                if OnlineGameMode.isJX3(game!) {
+                if OnlineGameMode.isJX3(game) {
                     OnlineGameMode.applyDefaultRuntimePreferences(to: gameOptions)
                     guard let bottleURL = OnlineGameMode.jx3BottleURL(appGlobals: appGlobals) else {
                         throw CocoaError(.fileNoSuchFile)
@@ -285,7 +346,7 @@ struct GameHeader: View {
                         crossOverAppPath: crossOverPath,
                         options: gameOptions
                     )
-                    libraryPageGlobals.playingID = game!.id
+                    libraryPageGlobals.playingID = game.id
                     libraryPageGlobals.setLoader(state: false)
                     libraryPageGlobals.jx3RuntimeActivity = JX3RuntimeActivity(
                         launcherProcessIdentifiers: [],
@@ -300,43 +361,43 @@ struct GameHeader: View {
                             libraryPageGlobals.jx3RuntimeActivity = activity
                         },
                         onTermination: {
-                            guard libraryPageGlobals.playingID == game!.id else { return }
+                            guard libraryPageGlobals.playingID == game.id else { return }
                             libraryPageGlobals.playingID = nil
                             libraryPageGlobals.jx3RuntimeActivity = .idle
                             libraryPageGlobals.setLoader(state: false)
                             jx3LaunchMonitor = nil
                         }
                     )
-                } else if isDirectNativeApplication {
-                    guard let appURL = game!.appExeURL else {
+                } else if game.isDirectNativeApplication {
+                    guard let appURL = game.appExeURL else {
                         throw CocoaError(.fileNoSuchFile)
                     }
                     let environment = gameOptions.mtlHudEnabled
                         ? ["MTL_HUD_ENABLED": "1"]
                         : [:]
                     try await nativeRuntimeStore.launchApplication(
-                        gameID: game!.id,
+                        gameID: game.id,
                         at: appURL,
                         environment: environment
                     )
                     libraryPageGlobals.setLoader(state: false)
-                } else if game!.isNative {
+                } else if game.isNative {
                     nativeRuntimeStore.expectApplicationLaunch(
-                        gameID: game!.id,
-                        appNames: game!.appNames,
-                        bundleIdentifier: game!.nativeAppBundleIdentifier
+                        gameID: game.id,
+                        appNames: game.appNames,
+                        bundleIdentifier: game.nativeAppBundleIdentifier
                     )
                     do {
                         try await launchNativeGame(
-                            id: String(game!.steamAppID),
+                            id: String(game.steamAppID),
                             cxAppPath: appGlobals.cxAppPath ?? "",
                             selectedBottle: appGlobals.selectedBottle,
                             options: gameOptions,
-                            appExeURL: game!.appExeURL
+                            appExeURL: game.appExeURL
                         )
                     } catch {
                         nativeRuntimeStore.cancelExpectedLaunch(
-                            gameID: game!.id,
+                            gameID: game.id,
                             error: error
                         )
                         throw error
@@ -345,35 +406,35 @@ struct GameHeader: View {
                 } else {
                     Task(priority: .background) {
                         do {
-                            tObserver = try await getGameTracker(appNames: game!.appNames, cxAppPath: game!.installedCrossOverPath ?? appGlobals.cxAppPath, bottleName: game!.installedBottleURL?.absoluteString ?? appGlobals.selectedBottle, onLoad: {
+                            tObserver = try await getGameTracker(appNames: game.appNames, cxAppPath: game.installedCrossOverPath ?? appGlobals.cxAppPath, bottleName: game.installedBottleURL?.absoluteString ?? appGlobals.selectedBottle, onLoad: {
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                                     libraryPageGlobals.setLoader(state: false)
                                 }
-                                libraryPageGlobals.playingID = game!.id
+                                libraryPageGlobals.playingID = game.id
                             }, onTerminate: {
                                 libraryPageGlobals.setLoader(state: false) // if doesn't get loaded i need to close the loader
                                 libraryPageGlobals.playingID = nil
                                 tObserver = nil
-                            }, isNative: game!.isNative,
-                            stopSteamOnTermination: game!.installedBottleURL == nil,
-                            steamAppID: game!.isCustom == true ? nil : game!.steamAppID,
+                            }, isNative: game.isNative,
+                            stopSteamOnTermination: game.installedBottleURL == nil,
+                            steamAppID: game.isCustom == true ? nil : game.steamAppID,
                             steamRootURL: appGlobals.windowsSteamFolder)
                         } catch {
                             console.error("Game tracking failed: \(String(reflecting: error))")
                             libraryPageGlobals.setLoader(state: false) // if doesn't get loaded i need to close the loader
                         }
                     }
-                    if(game!.isCustom == true && game!.appExeURL == nil) {
+                    if(game.isCustom == true && game.appExeURL == nil) {
                         console.error("custom game doesn't have an executable associated")
                         libraryPageGlobals.setLoader(state: false)
                         return
                     }
                     let steamExePath = appGlobals.windowsSteamFolder?.appendingPathComponent("Steam.exe").path(percentEncoded: false) ?? "C:\\Program Files (x86)\\Steam\\Steam.exe"
-                    try await launchWindowsGame(id: String(game!.steamAppID), cxAppPath: game!.installedCrossOverPath ?? appGlobals.cxAppPath, selectedBottle: game!.installedBottleURL?.absoluteString ?? appGlobals.selectedBottle, steamExePath: steamExePath, options: gameOptions, appExeURL: game!.appExeURL, installedRuntimeKind: game!.installedRuntimeKind)
+                    try await launchWindowsGame(id: String(game.steamAppID), cxAppPath: game.installedCrossOverPath ?? appGlobals.cxAppPath, selectedBottle: game.installedBottleURL?.absoluteString ?? appGlobals.selectedBottle, steamExePath: steamExePath, options: gameOptions, appExeURL: game.appExeURL, installedRuntimeKind: game.installedRuntimeKind, shaderGameID: game.id)
                 }
             } catch {
                 libraryPageGlobals.setLoader(state: false)
-                if OnlineGameMode.isJX3(game!) {
+                if OnlineGameMode.isJX3(game) {
                     libraryPageGlobals.jx3RuntimeActivity = .idle
                 }
                 console.error("Error launching game: \(String(reflecting: error))")

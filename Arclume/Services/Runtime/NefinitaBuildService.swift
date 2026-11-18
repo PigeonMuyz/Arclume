@@ -64,30 +64,34 @@ nonisolated struct NefinitaBuildService: Sendable {
             try fm.copyItem(at: sourceRoot.appendingPathComponent(path), to: target)
         }
         _ = try recipe.validateSource(session) // closes source-copy TOCTOU before executing scripts
-        let wineSource = try NefinitaWineSourceArchive.load()
-        try wineSource.validate(lock: String(contentsOf: session.appendingPathComponent("sources/WINE_SOURCE.lock"), encoding: .utf8))
-        let archive = try await NefinitaWineSourceCache().prepare(wineSource,
+        let materials = try NefinitaBuildMaterials.load().validatedMaterials(sourceRoot: session,
+            wine: NefinitaWineSourceArchive.load())
+        onProgress(0.1, "下载全部构建材料（0/\(materials.count)）…", log)
+        let files = try await NefinitaBuildMaterialCache().prepare(materials,
             baseURL: Bundle.main.object(forInfoDictionaryKey: "ArclumeResourceBaseURL") as? String,
             cacheRoot: fm.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("Arclume/BuildSources")) { status in
-                onProgress(0.1, status, log)
+                .appendingPathComponent("Arclume/BuildSources")) { snapshot in
+                let fraction = snapshot.totalBytes > 0 ? Double(snapshot.downloadedBytes) / Double(snapshot.totalBytes) : 0
+                let bytes = ByteCountFormatter.string(fromByteCount: snapshot.downloadedBytes, countStyle: .file)
+                let total = ByteCountFormatter.string(fromByteCount: snapshot.totalBytes, countStyle: .file)
+                let speed = ByteCountFormatter.string(fromByteCount: Int64(snapshot.bytesPerSecond), countStyle: .file)
+                onProgress(0.1 + 0.3 * fraction,
+                    "下载构建材料（\(snapshot.completedCount)/\(snapshot.totalCount)） · \(bytes) / \(total) · \(speed)/s", log)
             }
-        // Leave the pinned upstream scripts untouched. Their normal cache hit path
-        // consumes this verified archive and verifies it again before extraction.
+        // All downloads finish before scripts start. Keep authenticated upstream inputs unchanged.
         let downloads = session.appendingPathComponent("work/downloads", isDirectory: true)
-        try fm.createDirectory(at: downloads, withIntermediateDirectories: true)
-        try fm.copyItem(at: archive, to: downloads.appendingPathComponent(wineSource.archive))
-        let phases = [("sync-wine-source.sh", "下载并准备 Wine 源码"), ("sync-deps.sh", "下载并构建依赖组件"),
+        try NefinitaBuildMaterialCache.stage(materials, files: files, into: downloads)
+        let phases = [("sync-wine-source.sh", "准备 Wine 源码"), ("sync-deps.sh", "构建依赖组件"),
                       ("apply-finewine.sh", "准备并应用 FineWine 补丁"), ("build-runtime.sh", "编译 Nefinita")]
         for (index, phase) in phases.enumerated() {
             try Task.checkCancellation()
-            onProgress(0.1 + Double(index) / 5, phase.1, log)
+            onProgress(0.4 + Double(index) / 8, phase.1, log)
             var arguments = [session.appendingPathComponent("script/\(phase.0)").path]
             if phase.0 == "build-runtime.sh" { arguments += ["--output", session.appendingPathComponent("dist/nefinita-runtime.tar.xz").path] }
             // Observe bounded log chunks without buffering compiler output in memory.
             // Only recognized events become UI labels; raw paths/URLs stay in the log.
             let monitor = NefinitaBuildProgress.monitor(log: log) { detail in
-                onProgress(0.1 + Double(index) / 5, detail, log)
+                onProgress(0.4 + Double(index) / 8, detail, log)
             }
             do {
                 try await Self.run(arguments: arguments, directory: session, log: handle, phase: phase.1)

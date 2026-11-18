@@ -45,7 +45,7 @@ GitHub 发布工作流串行执行：准备资源 → 构建单 DMG → 上传�
 
 教学结束后可选择升级运行时／补全第三方组件，未选择 Steam 或剑网3 也能进入此页；仅使用 Mac 应用可以稍后配置。提示仅依据当前用途的必需组件，不因可选组件未下载而阻挡继续。设置和引导均提供组件独立下载入口，下载前确认项目、体积与并行方式。已安装当前版本 Wine 时不重复下载 Wine 归档。
 
-`requirements` 将依赖绑定到精确的 `runtimeID` / `runtimeVersion`，无声明或版本不匹配时不能套用其他引擎的依赖。Wine 1.1.2 自身只需 Wine 归档；Steam / 剑网3初始化另需当前 Mac 支持的默认 D3DMetal（3 或 4，只下载一种）和字体；NVNGX 单独可选。组件清单中的历史 DXMT、GStreamer、兼容修补归档继续保留供旧版兼容，但不属于当前运行时可选择的组件。App 已移除 CrossOver 修补能力，不再复制、重签或替换用户 CrossOver 中的文件。
+`requirements` 将依赖绑定到精确的 `runtimeID` / `runtimeVersion`，无声明或版本不匹配时不能套用其他引擎的依赖。Arclume Wine 1.1.4 自身只需 Wine 归档。Steam 初始化还需要默认的 D3DMetal 4 Beta 3 和字体。剑网 3 初始化根据已保存的图形方案选择 D3DMetal 4 Beta 3 或 DXMT 0.80，并下载所需字体。NVNGX 单独可选。清单中的 GStreamer 和兼容修补归档继续保留供旧版兼容。App 已移除 CrossOver 修补功能。
 
 组件下载和分段请求共享最多 3 路网络连接。大于等于 24 MiB 的文件只在 HEAD 确认 `Accept-Ranges: bytes` 且长度匹配时分成三段；不支持时降为普通单流。每段必须返回精确的 206 / Content-Range 和片长，不能把 200 响应拼接。分片以不超过 1 MiB 缓冲合并，最终仍核对完整归档 SHA。总进度按字节计量，速率显示本批次平均值；200ms 节流避免拖慢界面。失败取消剩余请求，已经成功的组件保留供重试复用。
 

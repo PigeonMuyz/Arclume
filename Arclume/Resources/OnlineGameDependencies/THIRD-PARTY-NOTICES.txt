@@ -1,6 +1,6 @@
-Arclume 剑网3模式内置运行资源
+Arclume 可下载运行组件
 
-本目录中的资源会随 Arclume App 一起发布，首次设置不需要从网络下载。
+App 仅包含组件清单和声明；运行资源由用户在首次设置或设置页选择下载。
 这些资源不因 Arclume 采用 GPL 而自动转为 GPL；完整的组件声明、上游来源和 Wine 对应源码位置见仓库根目录的 THIRD-PARTY-NOTICES.md，以及对应 GitHub Release 的来源链接。
 
 GStreamer framework 1.28.1
@@ -15,14 +15,20 @@ Noto Sans CJK SC Regular
 来源：https://github.com/notofonts/noto-cjk
 许可证：SIL Open Font License 1.1。
 
-GPTK / D3DMetal 3 和 4
+GPTK / D3DMetal 4 Beta 3
 作为 Apple 提供的兼容性组件随 Arclume 发布；不属于 Arclume GPL 源码，也不被本项目
 声明为开源。框架保留了所附版权和许可证材料；其中 Resources/LICENSE 是 xxHash 声明，
 不是 D3DMetal.framework 的完整许可文本。适用条款以 Apple Game Porting Toolkit 为准。
+来源：Apple Evaluation_environment_for_Windows_games_4.0_beta_3.dmg。
+DMG SHA-256：afa311da371f5b6dd970b45378a3d3df567cc9e535818f56f9b3f9d4c9537c1d。
+组件归档保留同一 redist 内的完整框架、共享库、Wine 模块和 Apple 附带的许可、致谢及说明。
 
-Arclume Wine 1.0.0 运行时
-归档 arclume-wine-1.0.0-x86_64.tar.xz 由独立的 Arclume-Runtime 仓库构建，
-包含用于剑网3的 Wine 11.0 实现、Dock 显示名补丁与 DXVK 文件。Wine 源码许可见上游
+Arclume Wine 1.1.4 运行时
+归档 arclume-wine-1.1.4-x86_64.tar.xz 由独立的 Arclume-Runtime 仓库构建，
+包含 Wine 11.0、24 个 FineWine 补丁、GStreamer 1.28.7、FFmpeg 7.1.5、dav1d 1.5.3
+及既有 DXVK 文件。媒体组件保留各自许可，源码材料与声明随 Runtime Release 提供。
+对应来源：https://github.com/PigeonMuyz/Arclume-Runtime/tree/arclume-wine-1.1.4
+Wine 源码许可见上游
 COPYING.LIB（LGPL-2.1-or-later）；对应源码、构建脚本和 Runtime 版本信息由该仓库
 与同版本 GitHub Release 提供。
 

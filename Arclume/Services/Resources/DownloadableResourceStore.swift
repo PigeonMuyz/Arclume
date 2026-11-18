@@ -29,8 +29,7 @@ nonisolated struct DownloadableResourceCatalog: Codable, Sendable {
         var displayName: String {
             switch id {
             case "io.arclume.runtime.wine": "Arclume Wine"
-            case "d3dmetal3": "D3DMetal 3"
-            case "d3dmetal4": "D3DMetal 4"
+            case "d3dmetal4": "D3DMetal 4 Beta 3"
             case "dxmt": "DXMT"
             case "gstreamer": "GStreamer"
             case "fonts": "Windows 字体"
@@ -226,8 +225,12 @@ final class DownloadableResourceStore: ObservableObject {
     @Published private(set) var activeProvider = WineRuntimeProvider.selected
     @Published private(set) var buildLog: URL?
     @Published private(set) var buildEnvironment: NefinitaBuildService.EnvironmentReport?
-    @Published private(set) var isBusy = false
-    @Published private(set) var isSwitchingRuntime = false
+    @Published private(set) var isBusy = false {
+        didSet { ArclumeResetCoordinator.setActivity(self, busy: isBusy || isSwitchingRuntime) }
+    }
+    @Published private(set) var isSwitchingRuntime = false {
+        didSet { ArclumeResetCoordinator.setActivity(self, busy: isBusy || isSwitchingRuntime) }
+    }
     @Published private(set) var progress: Double?
     @Published private(set) var message: String?
     @Published private(set) var error: String?
@@ -239,8 +242,11 @@ final class DownloadableResourceStore: ObservableObject {
     private var downloadGeneration = UUID()
     private var acceptingTransferProgress = false
     private let nefinitaReady: () -> Bool
-    init(nefinitaReady: @escaping () -> Bool = { NefinitaRuntime.isReady() }) {
+    private let jx3GraphicsBackend: () -> String
+    init(nefinitaReady: @escaping () -> Bool = { NefinitaRuntime.isReady() },
+         jx3GraphicsBackend: @escaping () -> String = DownloadableResourceStore.savedJX3GraphicsBackend) {
         self.nefinitaReady = nefinitaReady
+        self.jx3GraphicsBackend = jx3GraphicsBackend
     }
     #if DEBUG
     @Published var demonstrationStatus: ResourceSetupStatus?
@@ -253,24 +259,34 @@ final class DownloadableResourceStore: ObservableObject {
             selectedProvider == .nefinita ? Self.nefinitaComponentIDs.contains($0.id) : ids.contains($0.id)
         }
     }
-    private static let nefinitaComponentIDs: Set<String> = ["fonts", "d3dmetal3", "d3dmetal4", "nvngx-jx3"]
+    private static let nefinitaComponentIDs: Set<String> = ["fonts", "d3dmetal4", "nvngx-jx3"]
     var preparationTitle: String { selectedProvider == .nefinita && !nefinitaReady() ? "编译 Nefinita" : status.actionTitle }
     func checkBuildEnvironment() async { buildEnvironment = await NefinitaBuildService.inspectEnvironment() }
 
     func activateSelection() async throws {
         guard !isSwitchingRuntime else { throw ResourceDownloadError.busyRuntime }
-        guard status.isReady else { throw NefinitaBuildError.notBuilt }
-        guard selectedProvider != activeProvider else { return }
         let provider = selectedProvider
+        if !status.isReady { throw NefinitaBuildError.notBuilt }
         isSwitchingRuntime = true
         defer { isSwitchingRuntime = false }
+        message = "正在切换运行时…"
+        progress = nil
+        if !ArclumeTestEnvironment.isTesting {
+            let runtime = provider == .nefinita ? NefinitaRuntime.installationURL : BundledWineRuntime.installationURL
+            try await WineMonoSupport.prepare(runtimeURL: runtime) { [self] value, label in
+                Task { @MainActor [self] in progress = value; message = label }
+            }
+        }
+        guard provider != activeProvider else { return }
         try await Task.detached(priority: .userInitiated) {
             let defaults = UserDefaults(suiteName: suiteName) ?? .standard
-            let root = BundledWineRuntime.installationURL.deletingLastPathComponent().resolvingSymlinksInPath().path
             try WineRuntimeProvider.commitSelection(provider, in: defaults, runtimeReady: {
-                provider == .nefinita ? NefinitaRuntime.isReady() : BundledWineRuntime.isCurrentRuntime()
+                switch provider {
+                case .arclume: return BundledWineRuntime.isCurrentRuntime()
+                case .nefinita: return NefinitaRuntime.isReady()
+                }
             }, processesIdle: {
-                try ArclumeWineStopService.snapshot(root: root).isEmpty
+                try ArclumeWineStopService.managedRuntimeSnapshot().isEmpty
             })
         }.value
         activeProvider = provider
@@ -292,7 +308,24 @@ final class DownloadableResourceStore: ObservableObject {
         }
         guard let catalog, let expectedRuntime else { return [] }
         return (try? catalog.requiredIDs(for: expectedRuntime, purpose: purpose,
-            graphicsBackend: OnlineGameMode.defaultGraphicsBackend)) ?? []
+            graphicsBackend: graphicsBackend(for: purpose))) ?? []
+    }
+
+    func graphicsBackend(for purpose: DownloadableResourceCatalog.Purpose) -> String {
+        guard selectedProvider == .arclume, purpose == .jx3 else { return OnlineGameMode.defaultGraphicsBackend }
+        return OnlineGameMode.resolvedGraphicsBackend(jx3GraphicsBackend(),
+            supportingD3DMetal4: OnlineGameMode.supportsD3DMetal4)
+    }
+
+    private static func savedJX3GraphicsBackend() -> String {
+        guard !ArclumeTestEnvironment.isTesting,
+              let bottle = OnlineGameRuntimeKind.configuredBottleURL(for: .selected()),
+              let launcher = OnlineGameDiscovery.jx3Installation(in: bottle).preferredLaunchURL,
+              let data = (UserDefaults(suiteName: suiteName) ?? .standard).data(
+                forKey: namespacedKey("GameOptions", launcher.path(percentEncoded: false))),
+              let options = try? JSONDecoder().decode(GameOptionsData.self, from: data)
+        else { return OnlineGameMode.defaultGraphicsBackend }
+        return options.cxGraphicsBackend ?? OnlineGameMode.defaultGraphicsBackend
     }
     func confirmationMessage(purpose: DownloadableResourceCatalog.Purpose = .runtime, componentIDs: Set<String>? = nil) -> String {
         if selectedProvider == .nefinita && componentIDs == nil && !nefinitaReady() {
@@ -328,7 +361,7 @@ final class DownloadableResourceStore: ObservableObject {
         else if BundledWineRuntime.hasMigratableLegacyInstallation() { runtime = .update(installed: BundledWineRuntime.pendingLegacyRuntimeVersion()) }
         else { runtime = .missing }
         let ids = try? catalog?.requiredIDs(for: ArclumeRuntimeManifest.load(), purpose: purpose,
-            graphicsBackend: OnlineGameMode.defaultGraphicsBackend)
+            graphicsBackend: graphicsBackend(for: purpose))
         let components = catalog?.components.filter { $0.type != "runtime" && (ids?.contains($0.id) ?? false) } ?? []
         let missing = components.filter { !DownloadedResourceFiles.ready($0) }
         let pending = catalog?.components.filter { (ids?.contains($0.id) ?? false) && !componentReady($0) && !DownloadedResourceFiles.ready($0) } ?? []

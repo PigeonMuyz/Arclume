@@ -202,4 +202,98 @@ struct LibraryProgramLocationTests {
                 bottle: bottle, runtimeKind: "bundledWine", crossOverPath: nil, hidden: [identity]) == nil)
         }
     }
+
+    private func launcherShortcut(target: String, arguments: String = "\0", workingDirectory: String? = nil) -> Data {
+        let path = Array(target.utf8) + [0]
+        var bytes = [UInt8](repeating: 0, count: 76 + 28)
+        func put(_ value: Int, at offset: Int) {
+            for index in 0..<4 { bytes[offset + index] = UInt8(truncatingIfNeeded: value >> (index * 8)) }
+        }
+        put(76, at: 0)
+        bytes.replaceSubrange(4..<20, with: [1, 20, 2, 0, 0, 0, 0, 0, 192, 0, 0, 0, 0, 0, 0, 70])
+        put(2 | 0x80 | 32 | (workingDirectory == nil ? 0 : 16), at: 20)
+        put(1, at: 60)
+        put(28 + path.count, at: 76)
+        put(28, at: 80)
+        put(1, at: 84)
+        put(28, at: 92)
+        bytes += path
+        for value in [workingDirectory, arguments].compactMap({ $0 }) {
+            let count = value.utf16.count
+            bytes += [UInt8(truncatingIfNeeded: count), UInt8(truncatingIfNeeded: count >> 8)]
+            bytes += value.data(using: .utf16LittleEndian)!
+        }
+        return Data(bytes)
+    }
+
+    @Test func installerJX3ShortcutIsHiddenFromSharedLibraryWithoutChangingSavedEntries() throws {
+        try withRoot { root in
+            let bottle = root.resolvingSymlinksInPath()
+            let executable = bottle.appendingPathComponent("drive_c/SeasunGame/SeasunGame.exe")
+            try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data([0x4d, 0x5a]).write(to: executable)
+            var canonical = Game.emptyGame
+            canonical.id = OnlineGameMode.jx3GameID
+            canonical.isNative = false
+            canonical.isCustom = true
+            canonical.installedBottleURL = bottle
+            canonical.appExeURL = executable
+            var duplicate = canonical
+            duplicate.id = "installer-shortcut"
+            duplicate.name = "剑网3系列启动器"
+            duplicate.appExeURL = bottle.appendingPathComponent("剑网3系列启动器.lnk")
+            let shortcut = launcherShortcut(target: "C:\\SeasunGame\\SeasunGame.exe", workingDirectory: "C:\\SeasunGame\0")
+            try shortcut.write(to: duplicate.appExeURL!)
+            let library = LibraryPageGlobals(loadSavedLibrary: false)
+            library.customAddedGames = [duplicate, canonical]
+
+            #expect(library.allGames.map(\.id) == [canonical.id])
+            #expect(library.filteredGames.map(\.id) == [canonical.id])
+            #expect(library.customAddedGames.map(\.id) == [duplicate.id, canonical.id])
+            #expect(try Data(contentsOf: duplicate.appExeURL!) == shortcut)
+            #expect(StandardLibraryJX3.removingDuplicateShortcuts(from: [duplicate]).map(\.id) == [duplicate.id])
+            library.customAddedGames = [canonical]
+            library.customAddedGames.append(duplicate) // A later installer refresh uses the same shared list.
+            #expect(library.allGames.map(\.id) == [canonical.id])
+            #expect(library.customAddedGames.count == 2)
+        }
+    }
+
+    @Test func distinctJX3ShortcutIntentsAndOtherInstallationsStayVisible() throws {
+        try withRoot { root in
+            let bottle = root.resolvingSymlinksInPath()
+            let executable = bottle.appendingPathComponent("drive_c/SeasunGame/SeasunGame.exe")
+            try FileManager.default.createDirectory(at: executable.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data([0x4d, 0x5a]).write(to: executable)
+            var canonical = Game.emptyGame
+            canonical.id = OnlineGameMode.jx3GameID
+            canonical.isNative = false
+            canonical.isCustom = true
+            canonical.installedBottleURL = bottle
+            canonical.appExeURL = executable
+            var shortcut = canonical
+            shortcut.id = "shortcut"
+            shortcut.appExeURL = bottle.appendingPathComponent("剑网3系列启动器.lnk")
+            func retained(_ candidate: Game) -> Bool {
+                StandardLibraryJX3.removingDuplicateShortcuts(from: [canonical, candidate]).map(\.id) == [canonical.id, candidate.id]
+            }
+
+            try launcherShortcut(target: "C:\\SeasunGame\\SeasunGame.exe", arguments: "--custom-profile").write(to: shortcut.appExeURL!)
+            #expect(retained(shortcut))
+            try launcherShortcut(target: "C:\\SeasunGame\\SeasunGame.exe", workingDirectory: "C:\\Other").write(to: shortcut.appExeURL!)
+            #expect(retained(shortcut))
+            try launcherShortcut(target: "C:\\Other\\SeasunGame.exe").write(to: shortcut.appExeURL!)
+            #expect(retained(shortcut))
+            try launcherShortcut(target: "C:\\SeasunGame\\SeasunGame.exe").write(to: shortcut.appExeURL!)
+            shortcut.installedBottleURL = bottle.appendingPathComponent("AnotherBottle")
+            #expect(retained(shortcut))
+            shortcut.installedBottleURL = bottle
+            shortcut.appExeURL = bottle.appendingPathComponent("我的启动器.lnk")
+            try launcherShortcut(target: "C:\\SeasunGame\\SeasunGame.exe").write(to: shortcut.appExeURL!)
+            #expect(retained(shortcut))
+            shortcut.appExeURL = bottle.appendingPathComponent("剑网3系列启动器.lnk")
+            try Data([0, 1, 2]).write(to: shortcut.appExeURL!)
+            #expect(retained(shortcut))
+        }
+    }
 }

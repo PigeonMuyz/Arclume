@@ -4,6 +4,7 @@
 //
 
 import CryptoKit
+import Darwin
 import Foundation
 import OSLog
 
@@ -324,6 +325,7 @@ enum BundledWineRuntimeError: LocalizedError {
     case invalidPrefix
     case extractionFailed(Int32)
     case prefixInitializationFailed(Int32)
+    case unsupportedD3DMetal4
 
     var errorDescription: String? {
         switch self {
@@ -347,6 +349,8 @@ enum BundledWineRuntimeError: LocalizedError {
             "无法解压内置 Wine 运行时（退出状态 \(status)）。"
         case .prefixInitializationFailed(let status):
             "初始化内置 Wine 前缀失败（退出状态 \(status)）。详细诊断日志已保存。"
+        case .unsupportedD3DMetal4:
+            OnlineGameMode.d3dMetal4RequirementMessage
         }
     }
 }
@@ -424,7 +428,7 @@ enum BundledWineRuntime {
     }
 
     nonisolated static var prefixURL: URL {
-        WineRuntimeProvider.selected.prefixURL()
+        unifiedPrefixURL
     }
 
     nonisolated static var unifiedPrefixURL: URL {
@@ -432,7 +436,7 @@ enum BundledWineRuntime {
     }
 
     nonisolated static var standardSteamPrefixURL: URL {
-        WineRuntimeProvider.selected.prefixURL()
+        unifiedPrefixURL
     }
 
     nonisolated static var runtimeVersion: String {
@@ -440,7 +444,10 @@ enum BundledWineRuntime {
     }
 
     nonisolated static func ownsPrefix(_ bottleURL: URL) -> Bool {
-        WineRuntimeProvider.provider(for: bottleURL) != nil
+        switch WineRuntimeProvider.provider(for: bottleURL) {
+        case .arclume, .nefinita: true
+        default: false
+        }
     }
 
     nonisolated static func ownsStandardSteamPrefix(_ bottleURL: URL) -> Bool {
@@ -706,13 +713,15 @@ enum BundledWineRuntime {
 
     @discardableResult
     nonisolated static func preparePrefix(
-        progress: ProgressHandler?
+        progress: ProgressHandler?,
+        graphicsBackend: String? = nil
     ) throws -> URL {
         let target = prefixURL
         let result = try preparePrefix(
             at: target,
             containerName: target.lastPathComponent,
-            progress: progress
+            progress: progress,
+            graphicsBackend: graphicsBackend
         )
         NotificationCenter.default.post(name: .arclumeWinePrefixReady, object: result)
         return result
@@ -753,12 +762,14 @@ enum BundledWineRuntime {
         progress: ProgressHandler?,
         preparedRuntimeURL: URL? = nil,
         displayName: String? = nil,
-        initializationTimeout: TimeInterval? = nil
+        initializationTimeout: TimeInterval? = nil,
+        graphicsBackend: String? = nil
     ) throws -> URL {
         let displayName = displayName ?? containerName
         let launchTicket = try ArclumeWineStopService.launchTicket()
         progress?(0.01, "正在检查内置 Wine…")
         let runtimeURL = try preparedRuntimeURL ?? WineRuntimeProvider.ensureRuntime(for: targetPrefixURL)
+        try WineMonoSupport.ensureAvailable(runtimeURL: runtimeURL)
         if FileManager.default.fileExists(atPath: targetPrefixURL.path) {
             guard isValidPrefix(at: targetPrefixURL) else {
                 throw BundledWineRuntimeError.invalidPrefix
@@ -777,8 +788,10 @@ enum BundledWineRuntime {
         var preserveStaging = false
         defer { if !preserveStaging { try? fileManager.removeItem(at: stagingPrefixURL) } }
 
-        progress?(0.66, "正在准备 D3DMetal 和 Wine 环境…")
-        let graphicsBackend = OnlineGameMode.defaultGraphicsBackend
+        progress?(0.66, "正在准备图形后端和 Wine 环境…")
+        let graphicsBackend = graphicsBackend.map {
+            OnlineGameMode.resolvedGraphicsBackend($0, supportingD3DMetal4: OnlineGameMode.supportsD3DMetal4)
+        } ?? OnlineGameMode.defaultGraphicsBackend
         let configuration = try makeLaunchConfiguration(
             runtimeURL: runtimeURL,
             graphicsBackend: graphicsBackend,
@@ -884,13 +897,26 @@ enum BundledWineRuntime {
             options.cxGraphicsBackend,
             supportingD3DMetal4: OnlineGameMode.supportsD3DMetal4
         )
-        return try makeLaunchConfiguration(
+        let configuration = try makeLaunchConfiguration(
             runtimeURL: runtimeURL,
             graphicsBackend: graphicsBackend,
             d3dMetal4Enabled: graphicsBackend == "d3dmetal4",
             mtlHudEnabled: options.mtlHudEnabled,
             wineMSync: options.wineMSync
         )
+        var environment = configuration.environment
+        if graphicsBackend == "dxmt" {
+            var settings: [String] = []
+            if options.dxmtPreferredMaxFrameRate.isFinite, options.dxmtPreferredMaxFrameRate > 20 {
+                settings.append("d3d11.preferredMaxFrameRate=\(options.dxmtPreferredMaxFrameRate)")
+            }
+            environment["DXMT_METALFX_SPATIAL_SWAPCHAIN"] = options.dxmtMetalFXSpatial ? "1" : "0"
+            if options.dxmtMetalFXSpatial, options.dxmtMetalSpatialUpscaleFactor.isFinite {
+                settings.append("d3d11.metalSpatialUpscaleFactor=\(options.dxmtMetalSpatialUpscaleFactor)")
+            }
+            environment["DXMT_CONFIG"] = settings.joined(separator: ";")
+        }
+        return LaunchConfiguration(wineURL: configuration.wineURL, runtimeURL: configuration.runtimeURL, environment: environment)
     }
 
     nonisolated static func makeDefaultLaunchConfiguration(prefix: URL? = nil) throws -> LaunchConfiguration {
@@ -905,13 +931,17 @@ enum BundledWineRuntime {
         )
     }
 
-    nonisolated private static func makeLaunchConfiguration(
+    nonisolated static func makeLaunchConfiguration(
         runtimeURL: URL,
         graphicsBackend: String,
         d3dMetal4Enabled: Bool,
         mtlHudEnabled: Bool,
-        wineMSync: Bool
+        wineMSync: Bool,
+        graphicsRoot: URL? = nil
     ) throws -> LaunchConfiguration {
+        guard graphicsBackend == "dxmt" || OnlineGameMode.supportsD3DMetal4 else {
+            throw BundledWineRuntimeError.unsupportedD3DMetal4
+        }
         guard isCurrentRuntime(at: runtimeURL) else {
             throw BundledWineRuntimeError.invalidRuntime
         }
@@ -919,31 +949,32 @@ enum BundledWineRuntime {
             throw NefinitaBuildError.failed("Nefinita 当前仅接入 D3DMetal 图形后端，请在运行设置中选择 D3DMetal")
         }
 
-        let d3dMetalVersion = graphicsBackend == "d3dmetal3" ? "3" : "4"
-        guard let graphicsRootURL = try BundledOnlineGameResources.bundledURL(
-            named: "d3dMetal\(d3dMetalVersion)"
+        let usesDXMT = graphicsBackend == "dxmt"
+        let resource = usesDXMT ? "dxmt" : "d3dMetal4"
+        guard let graphicsRootURL = try graphicsRoot ?? BundledOnlineGameResources.bundledURL(
+            named: resource
         ) else {
             throw BundledOnlineGameResourceError.missingResource(
-                BundledOnlineGameResources.d3dMetalArchiveName(version: d3dMetalVersion)
+                usesDXMT ? BundledOnlineGameResources.dxmtArchiveName
+                    : BundledOnlineGameResources.d3dMetalArchiveName(version: "4")
             )
         }
-        let graphicsWineURL = graphicsRootURL.appendingPathComponent("wine", isDirectory: true)
-        let d3dSharedURL = graphicsRootURL.appendingPathComponent(
-            "external/libd3dshared.dylib",
-            isDirectory: false
-        )
-        guard FileManager.default.fileExists(atPath: graphicsWineURL.path),
-              FileManager.default.fileExists(atPath: d3dSharedURL.path)
-        else {
-            throw BundledOnlineGameResourceError.invalidArchive("d3dMetal\(d3dMetalVersion)")
+        let graphicsWineURL = usesDXMT ? graphicsRootURL
+            : graphicsRootURL.appendingPathComponent("wine", isDirectory: true)
+        if usesDXMT {
+            try BundledOnlineGameResources.validateDXMT(at: graphicsRootURL)
+            try installDXMTModules(from: graphicsRootURL, into: runtimeURL)
+        } else {
+            let shared = graphicsRootURL.appendingPathComponent("external/libd3dshared.dylib")
+            guard FileManager.default.fileExists(atPath: shared.path) else {
+                throw BundledOnlineGameResourceError.invalidArchive(resource)
+            }
+            try BundledOnlineGameResources.validateD3DMetalVersion(at: graphicsRootURL)
+            try installD3DMetalModules(from: graphicsWineURL, into: runtimeURL, version: "4")
         }
-        try installD3DMetalModules(
-            from: graphicsWineURL,
-            into: runtimeURL,
-            version: d3dMetalVersion
-        )
 
         var environment = ProcessInfo.processInfo.environment
+        WineMonoSupport.applyEnvironment(to: &environment)
         environment["WINEDATADIR"] = runtimeURL.appendingPathComponent("share/wine").path
         environment["WINESERVER"] = runtimeURL.appendingPathComponent("bin/wineserver").path
         if runtimeURL == NefinitaRuntime.installationURL {
@@ -1005,7 +1036,7 @@ enum BundledWineRuntime {
 
         return [
             "WINEDLLPATH": wineDLLPaths.joined(separator: ":"),
-            "PROCYON_DLL_PATH": usesD3DMetal ? graphicsWineURL.path : "",
+            "PROCYON_DLL_PATH": usesD3DMetal || graphicsBackend == "dxmt" ? graphicsWineURL.path : "",
             // Mirrors CrossOver's explicit GPTK dependency handoff.
             "CX_APPLEGPTK_LIBD3DSHARED_PATH": usesD3DMetal
                 ? graphicsRootURL.appendingPathComponent("external/libd3dshared.dylib").path
@@ -1025,7 +1056,11 @@ enum BundledWineRuntime {
             // CrossOver normally derives this through cxcompatdb. The bundled
             // runtime launches Wine directly, so provide the final value.
             "CX_ACTIVE_GRAPHICS_BACKEND": activeBackend,
-            "D3DM_MTL4": d3dMetal4Enabled ? "1" : "0",
+            // Beta 3 enables its Metal 4 backend on macOS 27 and later.
+            // The same D3DMetal 4 component uses its Metal 3 backend on macOS 26.
+            "D3DM_MTL4": d3dMetal4Enabled && ProcessInfo.processInfo.isOperatingSystemAtLeast(
+                OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0)
+            ) ? "1" : "0",
             "D3DM_ENABLE_METALFX": "1",
             "DXMT_ENABLE_NVEXT": "1",
             "MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS": "1",
@@ -1037,17 +1072,30 @@ enum BundledWineRuntime {
     /// when WINEDLLPATH names a separate archive. Install the D3DMetal module
     /// pair atomically into the disposable runtime instead of copying either
     /// the Games prefix or any game resource.
-    nonisolated private static func installD3DMetalModules(
+    nonisolated static func installD3DMetalModules(
         from graphicsWineURL: URL,
         into runtimeURL: URL,
         version: String
+    ) throws {
+        try installGraphicsModules(from: graphicsWineURL, into: runtimeURL, backend: "d3dmetal\(version)")
+    }
+
+    nonisolated static func installDXMTModules(from root: URL, into runtime: URL) throws {
+        try BundledOnlineGameResources.validateDXMT(at: root)
+        try installGraphicsModules(from: root, into: runtime, backend: "dxmt-\(BundledOnlineGameResources.dxmtVersion)")
+    }
+
+    nonisolated private static func installGraphicsModules(
+        from graphicsWineURL: URL, into runtimeURL: URL, backend: String
     ) throws {
         graphicsModuleInstallationLock.lock()
         defer { graphicsModuleInstallationLock.unlock() }
 
         let fileManager = FileManager.default
-        var modulePairs: [(source: URL, sourceContent: URL, destination: URL)] = []
-        for directoryName in graphicsModuleDirectoryNames {
+        var modulePairs: [(source: URL, sourceContent: URL, destination: URL, isSymbolicLink: Bool)] = []
+        let usesDXMT = backend.hasPrefix("dxmt-")
+        let directories = usesDXMT ? graphicsModuleDirectoryNames + ["i386-windows"] : graphicsModuleDirectoryNames
+        for directoryName in directories {
             let sourceDirectoryURL = graphicsWineURL.appendingPathComponent(
                 directoryName,
                 isDirectory: true
@@ -1059,7 +1107,7 @@ enum BundledWineRuntime {
             guard fileManager.fileExists(atPath: sourceDirectoryURL.path),
                   fileManager.fileExists(atPath: destinationDirectoryURL.path)
             else {
-                throw BundledOnlineGameResourceError.invalidArchive("d3dMetal\(version)")
+                throw BundledOnlineGameResourceError.invalidArchive(backend)
             }
 
             let sourceURLs = try fileManager.contentsOfDirectory(
@@ -1067,7 +1115,7 @@ enum BundledWineRuntime {
                 includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
                 options: [.skipsHiddenFiles]
             )
-            let moduleSources = sourceURLs.compactMap { sourceURL -> (source: URL, content: URL)? in
+            let moduleSources = sourceURLs.compactMap { sourceURL -> (source: URL, content: URL, isSymbolicLink: Bool)? in
                 guard let values = try? sourceURL.resourceValues(
                     forKeys: [.isRegularFileKey, .isSymbolicLinkKey]
                 ), values.isRegularFile == true || values.isSymbolicLink == true
@@ -1075,10 +1123,8 @@ enum BundledWineRuntime {
                     return nil
                 }
 
-                // GPTK's Unix modules are symbolic links to
-                // libd3dshared.dylib. The runtime has a different directory
-                // layout, so copy the target's contents rather than a broken
-                // relative symlink.
+                // Keep one canonical shared library image. Copying the Unix
+                // links as separate binaries breaks CrossOver's ABI dispatch.
                 let contentURL = values.isSymbolicLink == true
                     ? sourceURL.resolvingSymlinksInPath()
                     : sourceURL
@@ -1087,10 +1133,10 @@ enum BundledWineRuntime {
                 ).isRegularFile) == true else {
                     return nil
                 }
-                return (sourceURL, contentURL)
+                return (sourceURL, contentURL, values.isSymbolicLink == true)
             }
             guard !moduleSources.isEmpty else {
-                throw BundledOnlineGameResourceError.invalidArchive("d3dMetal\(version)")
+                throw BundledOnlineGameResourceError.invalidArchive(backend)
             }
             modulePairs += moduleSources.map { source in
                 (
@@ -1098,65 +1144,213 @@ enum BundledWineRuntime {
                     sourceContent: source.content,
                     destination: destinationDirectoryURL.appendingPathComponent(
                         source.source.lastPathComponent
-                    )
+                    ),
+                    isSymbolicLink: source.isSymbolicLink
                 )
             }
         }
 
-        let requiredModuleNames: Set<String> = ["d3d11.dll", "dxgi.dll", "d3d11.so", "dxgi.so"]
+        let requiredModuleNames: Set<String> = usesDXMT
+            ? ["d3d11.dll", "dxgi.dll", "d3d10core.dll", "winemetal.dll", "winemetal.so"]
+            : [
+            "d3d11.dll", "d3d12.dll", "d3d12core.dll", "dxgi.dll",
+            "d3d11.so", "d3d12.so", "d3d12core.so", "dxgi.so"
+        ]
         guard requiredModuleNames.isSubset(of: Set(modulePairs.map { $0.source.lastPathComponent })) else {
-            throw BundledOnlineGameResourceError.invalidArchive("d3dMetal\(version)")
+            throw BundledOnlineGameResourceError.invalidArchive(backend)
         }
 
         let markerURL = runtimeURL.appendingPathComponent(graphicsModuleMarkerFileName)
-        let expectedMarker = "d3dmetal\(version)\n"
+        let expectedMarker = "\(backend)\n"
+        let ownershipURL = runtimeURL.appendingPathComponent(".arclume-graphics-modules.json")
+        let oldOwnership = try? Data(contentsOf: ownershipURL)
+        let oldMarker = try? Data(contentsOf: markerURL)
+        let previousPaths: [String]
+        if FileManager.default.fileExists(atPath: ownershipURL.path) {
+            previousPaths = try JSONDecoder().decode([String].self, from: Data(contentsOf: ownershipURL))
+        } else {
+            previousPaths = []
+        }
+        guard previousPaths.allSatisfy({ relative in
+            let parts = relative.split(separator: "/")
+            return parts.count == 2 && (graphicsModuleDirectoryNames + ["i386-windows"]).contains(String(parts[0]))
+                && parts[1] != "." && parts[1] != ".."
+        }) else { throw BundledOnlineGameResourceError.invalidArchive(backend) }
+        let relativePath: (URL) -> String = { "\($0.deletingLastPathComponent().lastPathComponent)/\($0.lastPathComponent)" }
+        let installedPaths = Set(modulePairs.map { relativePath($0.source) })
+        // DXMT talks to Metal through winemetal. Remove stale GPTK Unix
+        // dispatch modules even for installations created before ownership tracking.
+        let disabledPaths = usesDXMT
+            ? Set(["d3d11", "dxgi", "d3d10core"].map { "x86_64-unix/\($0).so" })
+            : Set<String>()
+        let desiredPaths = installedPaths.union(disabledPaths)
+        let modulesMatch = {
+            modulePairs.allSatisfy { pair in
+                if pair.isSymbolicLink {
+                    return (try? fileManager.attributesOfItem(atPath: pair.destination.path)[.type])
+                        as? FileAttributeType == .typeSymbolicLink
+                        && pair.destination.resolvingSymlinksInPath() == pair.sourceContent
+                }
+                return fileManager.contentsEqual(
+                    atPath: pair.sourceContent.path, andPath: pair.destination.path
+                )
+            }
+        }
         if (try? String(contentsOf: markerURL, encoding: .utf8)) == expectedMarker,
-           modulePairs.allSatisfy({ pair in
-               fileManager.contentsEqual(atPath: pair.sourceContent.path, andPath: pair.destination.path)
+           modulesMatch(),
+           Set(previousPaths) == desiredPaths,
+           disabledPaths.allSatisfy({ relative in
+               (try? fileManager.attributesOfItem(atPath: runtimeURL.appendingPathComponent("lib/wine/\(relative)").path)) == nil
            }) {
             return
         }
 
+        guard try !graphicsModulesAreInUse(runtimeURL: runtimeURL) else {
+            throw ResourceDownloadError.busyRuntime
+        }
+
         let stagingURL = runtimeURL.appendingPathComponent(
-            ".arclume-d3dmetal-staging-\(UUID().uuidString)",
+            ".arclume-graphics-staging-\(UUID().uuidString)",
             isDirectory: true
         )
         try fileManager.createDirectory(at: stagingURL, withIntermediateDirectories: true)
         defer { try? fileManager.removeItem(at: stagingURL) }
 
+        let originals = runtimeURL.appendingPathComponent(".arclume-graphics-originals", isDirectory: true)
+        let affectedPaths = Set(previousPaths).union(desiredPaths)
+        for relative in affectedPaths.sorted() {
+            let destination = runtimeURL.appendingPathComponent("lib/wine/\(relative)")
+            let original = originals.appendingPathComponent(relative)
+            let absent = originals.appendingPathComponent(relative + ".absent")
+            try fileManager.createDirectory(at: original.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if (try? fileManager.attributesOfItem(atPath: original.path)) == nil,
+               !fileManager.fileExists(atPath: absent.path) {
+                if (try? fileManager.attributesOfItem(atPath: destination.path)) != nil {
+                    try fileManager.copyItem(at: destination, to: original)
+                } else {
+                    try Data().write(to: absent, options: .atomic)
+                }
+            }
+        }
         for pair in modulePairs {
             let relativeDirectory = pair.source.deletingLastPathComponent().lastPathComponent
             let stagedDirectoryURL = stagingURL.appendingPathComponent(relativeDirectory, isDirectory: true)
             try fileManager.createDirectory(at: stagedDirectoryURL, withIntermediateDirectories: true)
-            try fileManager.copyItem(
-                at: pair.sourceContent,
-                to: stagedDirectoryURL.appendingPathComponent(pair.source.lastPathComponent)
-            )
-        }
-
-        for pair in modulePairs {
-            let relativeDirectory = pair.source.deletingLastPathComponent().lastPathComponent
-            let stagedURL = stagingURL
-                .appendingPathComponent(relativeDirectory, isDirectory: true)
-                .appendingPathComponent(pair.source.lastPathComponent)
-            if fileManager.fileExists(atPath: pair.destination.path) {
-                try fileManager.replaceItemAt(
-                    pair.destination,
-                    withItemAt: stagedURL,
-                    backupItemName: nil,
-                    options: []
-                )
+            let stagedModule = stagedDirectoryURL.appendingPathComponent(pair.source.lastPathComponent)
+            if pair.isSymbolicLink {
+                try fileManager.createSymbolicLink(at: stagedModule, withDestinationURL: pair.sourceContent)
             } else {
-                try fileManager.moveItem(at: stagedURL, to: pair.destination)
+                try fileManager.copyItem(at: pair.sourceContent, to: stagedModule)
             }
         }
 
-        guard modulePairs.allSatisfy({ pair in
-            fileManager.contentsEqual(atPath: pair.sourceContent.path, andPath: pair.destination.path)
-        }) else {
-            throw BundledOnlineGameResourceError.invalidArchive("d3dMetal\(version)")
+        // Restore modules owned only by the previous backend from their original
+        // runtime files, including d3d10core, winemetal and 32-bit DXMT modules.
+        var replacements = installedPaths
+        for relative in Set(previousPaths).subtracting(desiredPaths) {
+            let original = originals.appendingPathComponent(relative)
+            if (try? fileManager.attributesOfItem(atPath: original.path)) != nil {
+                let staged = stagingURL.appendingPathComponent(relative)
+                try fileManager.createDirectory(at: staged.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fileManager.copyItem(at: original, to: staged)
+                replacements.insert(relative)
+            }
         }
-        try expectedMarker.write(to: markerURL, atomically: true, encoding: .utf8)
+        let rollback = stagingURL.appendingPathComponent("rollback")
+        try fileManager.createDirectory(at: rollback, withIntermediateDirectories: true)
+        var applied: [String] = []
+        do {
+            for relative in affectedPaths.sorted() {
+                let destination = runtimeURL.appendingPathComponent("lib/wine/\(relative)")
+                let stagedURL = stagingURL.appendingPathComponent(relative)
+                let previous = rollback.appendingPathComponent(relative)
+                if (try? fileManager.attributesOfItem(atPath: destination.path)) != nil {
+                    try fileManager.createDirectory(at: previous.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try fileManager.copyItem(at: destination, to: previous)
+                }
+                applied.append(relative)
+                if !replacements.contains(relative) {
+                    if (try? fileManager.attributesOfItem(atPath: destination.path)) != nil {
+                        try fileManager.removeItem(at: destination)
+                    }
+                    continue
+                }
+                // POSIX rename replaces the link itself instead of following it.
+                // Staging is on the runtime volume, so each module replacement is atomic.
+                guard Darwin.rename(stagedURL.path, destination.path) == 0 else {
+                    throw NSError(
+                        domain: NSPOSIXErrorDomain, code: Int(errno),
+                        userInfo: [NSFilePathErrorKey: destination.path]
+                    )
+                }
+            }
+            guard modulesMatch() else { throw BundledOnlineGameResourceError.invalidArchive(backend) }
+            try JSONEncoder().encode(desiredPaths.sorted()).write(to: ownershipURL, options: .atomic)
+            try expectedMarker.write(to: markerURL, atomically: true, encoding: .utf8)
+        } catch {
+            for relative in applied.reversed() {
+                let destination = runtimeURL.appendingPathComponent("lib/wine/\(relative)")
+                let previous = rollback.appendingPathComponent(relative)
+                if (try? fileManager.attributesOfItem(atPath: previous.path)) != nil {
+                    _ = Darwin.rename(previous.path, destination.path)
+                } else {
+                    try? fileManager.removeItem(at: destination)
+                }
+            }
+            if let oldOwnership { try? oldOwnership.write(to: ownershipURL, options: .atomic) }
+            else { try? fileManager.removeItem(at: ownershipURL) }
+            if let oldMarker { try? oldMarker.write(to: markerURL, options: .atomic) }
+            else { try? fileManager.removeItem(at: markerURL) }
+            throw error
+        }
+    }
+
+    /// Wine's idle services and keepalive client do not hold graphics modules.
+    /// Only a client already mapping a replaced D3D/Metal module prevents a switch.
+    nonisolated private static func graphicsModulesAreInUse(runtimeURL: URL) throws -> Bool {
+        let root = runtimeURL.resolvingSymlinksInPath().standardizedFileURL.path
+        let clients = try ArclumeWineStopService.snapshot(root: root)
+        guard !clients.isEmpty else { return false }
+        let output = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Arclume-GraphicsScan-\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: output.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
+            throw ArclumeWineStopService.StopError.enumerationFailed
+        }
+        defer { try? FileManager.default.removeItem(at: output) }
+        let file = try FileHandle(forWritingTo: output)
+        defer { try? file.close() }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        process.arguments = ["-n", "-P", "-a", "-p", clients.map { String($0.pid) }.joined(separator: ","), "-d", "txt", "-Fpn"]
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = file
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        defer { if process.isRunning { process.terminate() } }
+        guard ContainerInitializationProcess.wait(process, timeout: 3),
+              process.terminationReason == .exit, process.terminationStatus == 0 || process.terminationStatus == 1,
+              (try output.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 8 * 1024 * 1024
+        else { throw ArclumeWineStopService.StopError.enumerationFailed }
+        let loaded = graphicsModulePIDs(try String(contentsOf: output, encoding: .utf8))
+        return clients.contains { loaded.contains($0.pid) && ArclumeWineStopService.readIdentity($0.pid) == $0 }
+    }
+
+    nonisolated static func graphicsModulePIDs(_ output: String) -> Set<Int32> {
+        let modules: Set<String> = [
+            "d3d10core.dll", "d3d11.dll", "d3d12.dll", "d3d12core.dll", "dxgi.dll", "winemetal.dll",
+            "d3d11.so", "d3d12.so", "d3d12core.so", "dxgi.so", "winemetal.so",
+            "nvapi64.dll", "nvngx.dll", "libd3dshared.dylib", "d3dmetal"
+        ]
+        var pid: Int32?
+        var loaded = Set<Int32>()
+        for line in output.split(separator: "\n") {
+            if line.first == "p" { pid = Int32(line.dropFirst()) }
+            if line.first == "n", let pid,
+               modules.contains(URL(fileURLWithPath: String(line.dropFirst())).lastPathComponent.lowercased()) {
+                loaded.insert(pid)
+            }
+        }
+        return loaded
     }
 
     nonisolated private static func requiredRuntimeManifest() throws -> ArclumeRuntimeManifest {
@@ -1322,7 +1516,9 @@ enum BundledWineRuntime {
             "CX_GRAPHICS_BACKEND",
             "CX_ACTIVE_GRAPHICS_BACKEND",
             "D3DM_MTL4",
-            "ROSETTA_ADVERTISE_AVX"
+            "ROSETTA_ADVERTISE_AVX",
+            "MTL_HUD_ENABLED",
+            "__CX_UNIX_MTL_HUD_ENABLED"
         ] {
             try? writePrefixInitializationLog(
                 "环境 \(key)=\(environment[key] ?? "<未设置>")",

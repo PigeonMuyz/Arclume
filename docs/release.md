@@ -50,6 +50,8 @@ DMG 由 `hdiutil verify` 校验。发布流程还会检查 App Bundle 中没有�
 
 未配置时仍会产出未签名 DMG，并可由应用内更新器安装。此流程不包含 Apple Notary 凭据；公证需要在后续单独接入。
 
+仓库未启用 Actions 时，维护者可以在本机构建同版本的 Release Archive，从本地配置注入下载地址，并按相同的资源排除规则检查 App Bundle。制作并校验 DMG 和 SHA-256 后，将它们上传到关联精确提交 SHA 的 GitHub 草稿。确认公开的运行组件能按固定清单下载，并核对草稿附件的大小与摘要，再将它设为正式 Release。
+
 ## 发布后验证
 
 1. 确认 GitHub Release tag、目标 commit、标题、资产和 SHA-256 全部正确。

@@ -32,7 +32,7 @@ struct ResourceRequirementTests {
         for runtime: ArclumeRuntimeManifest,
         componentIDs: [String] = [],
         features: [String: [String]] = ["steam": ["fonts"], "jx3": ["fonts"]],
-        graphicsComponentIDs: [String]? = ["d3dmetal3", "d3dmetal4"],
+        graphicsComponentIDs: [String]? = ["d3dmetal4"],
         optionalComponentIDs: [String]? = ["nvngx-jx3"]
     ) -> [String: Any] {
         var value: [String: Any] = [
@@ -80,7 +80,6 @@ struct ResourceRequirementTests {
 
         #expect(ids == Set([
             "io.arclume.runtime.wine",
-            "d3dmetal3",
             "d3dmetal4",
             "fonts",
             "nvngx-jx3"
@@ -123,13 +122,14 @@ struct ResourceRequirementTests {
         #expect(ids == Set([runtime.id, "fonts"]))
     }
 
-    @Test func selectedD3DMetal3BackendDoesNotAlsoRequireD3DMetal4() throws {
+    @Test func removedD3DMetal3BackendIsRejectedByTheCatalog() throws {
         let runtime = try runtime()
         let catalog = try decodeCatalog(catalogObject(requirements: [requirement(for: runtime)]))
 
-        let ids = try catalog.requiredIDs(for: runtime, purpose: .steam, graphicsBackend: "d3dmetal3")
-
-        #expect(ids == Set(["io.arclume.runtime.wine", "d3dmetal3", "fonts"]))
+        #expect(!catalog.components.contains(where: { $0.id == "d3dmetal3" }))
+        #expect(throws: ResourceDownloadError.self) {
+            try catalog.requiredIDs(for: runtime, purpose: .steam, graphicsBackend: "d3dmetal3")
+        }
     }
 
     @Test func missingOrEmptyGraphicsRequirementsDoNotForceAGraphicsComponent() throws {

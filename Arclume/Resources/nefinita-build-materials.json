@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "revision": "cadaabf0705efa677e4683a2af86d1da3316e8bb",
+  "materials": [
+    {
+      "id": "freetype",
+      "version": "2.13.3",
+      "archive": "freetype-2.13.3.tar.xz",
+      "originURL": "https://download.savannah.gnu.org/releases/freetype/freetype-2.13.3.tar.xz",
+      "sha256": "0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289",
+      "byteCount": 2617564,
+      "objectKey": "components/source/freetype/dev.nefinita.source.freetype/2.13.3/0550350666d427c74daeb85d5ac7bb353acba5f76956395995311a9c6f063289/freetype-2.13.3.tar.xz"
+    },
+    {
+      "id": "ffmpeg",
+      "version": "7.1.5",
+      "archive": "ffmpeg-7.1.5.tar.xz",
+      "originURL": "https://ffmpeg.org/releases/ffmpeg-7.1.5.tar.xz",
+      "sha256": "de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f",
+      "byteCount": 11050340,
+      "objectKey": "components/source/ffmpeg/dev.nefinita.source.ffmpeg/7.1.5/de668509caf9e35e3cd162473441fdb29538c6d96ed080292b3cf9e6fc5d558f/ffmpeg-7.1.5.tar.xz"
+    },
+    {
+      "id": "glib",
+      "version": "2.88.3",
+      "archive": "glib-2.88.3.tar.xz",
+      "originURL": "https://download.gnome.org/sources/glib/2.88/glib-2.88.3.tar.xz",
+      "sha256": "ab24d24e698dfa1e408b7bcdb508f4aafc906185a8b8ce72fdf79bbbdc9b383b",
+      "byteCount": 5794356,
+      "objectKey": "components/source/glib/dev.nefinita.source.glib/2.88.3/ab24d24e698dfa1e408b7bcdb508f4aafc906185a8b8ce72fdf79bbbdc9b383b/glib-2.88.3.tar.xz"
+    },
+    {
+      "id": "gmp",
+      "version": "6.3.0",
+      "archive": "gmp-6.3.0.tar.xz",
+      "originURL": "https://ftp.gnu.org/gnu/gmp/gmp-6.3.0.tar.xz",
+      "sha256": "a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898",
+      "byteCount": 2094196,
+      "objectKey": "components/source/gmp/dev.nefinita.source.gmp/6.3.0/a3c2b80201b89e68616f4ad30bc66aee4927c3ce50e33929ca819d5c43538898/gmp-6.3.0.tar.xz"
+    },
+    {
+      "id": "gnutls",
+      "version": "3.8.13",
+      "archive": "gnutls-3.8.13.tar.xz",
+      "originURL": "https://www.gnupg.org/ftp/gcrypt/gnutls/v3.8/gnutls-3.8.13.tar.xz",
+      "sha256": "ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e",
+      "byteCount": 7275324,
+      "objectKey": "components/source/gnutls/dev.nefinita.source.gnutls/3.8.13/ffed8ec1bf09c2426d4f14aae377de4753b53e537d685e604e99a8b16ca9c97e/gnutls-3.8.13.tar.xz"
+    },
+    {
+      "id": "gstreamer",
+      "version": "1.28.7",
+      "archive": "gstreamer-1.28.7.tar.xz",
+      "originURL": "https://gstreamer.freedesktop.org/src/gstreamer/gstreamer-1.28.7.tar.xz",
+      "sha256": "787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e",
+      "byteCount": 1959924,
+      "objectKey": "components/source/gstreamer/dev.nefinita.source.gstreamer/1.28.7/787329b2c5758e228a71d926a6dcf960bceaacca3cadd63874ba665dfcda013e/gstreamer-1.28.7.tar.xz"
+    },
+    {
+      "id": "gst-libav",
+      "version": "1.28.7",
+      "archive": "gst-libav-1.28.7.tar.xz",
+      "originURL": "https://gstreamer.freedesktop.org/src/gst-libav/gst-libav-1.28.7.tar.xz",
+      "sha256": "58da51dd39ecf1cf6faade34cc6412001be2e2e145bca8ae0f45336f60a36ab2",
+      "byteCount": 220864,
+      "objectKey": "components/source/gst-libav/dev.nefinita.source.gst-libav/1.28.7/58da51dd39ecf1cf6faade34cc6412001be2e2e145bca8ae0f45336f60a36ab2/gst-libav-1.28.7.tar.xz"
+    },
+    {
+      "id": "gst-plugins-bad",
+      "version": "1.28.7",
+      "archive": "gst-plugins-bad-1.28.7.tar.xz",
+      "originURL": "https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.28.7.tar.xz",
+      "sha256": "dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe",
+      "byteCount": 8347976,
+      "objectKey": "components/source/gst-plugins-bad/dev.nefinita.source.gst-plugins-bad/1.28.7/dc525383c18b2c265bbe6a43d498656cd918aaa130aa4e3abeabcdaa741c3ffe/gst-plugins-bad-1.28.7.tar.xz"
+    },
+    {
+      "id": "gst-plugins-base",
+      "version": "1.28.7",
+      "archive": "gst-plugins-base-1.28.7.tar.xz",
+      "originURL": "https://gstreamer.freedesktop.org/src/gst-plugins-base/gst-plugins-base-1.28.7.tar.xz",
+      "sha256": "ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7",
+      "byteCount": 2558440,
+      "objectKey": "components/source/gst-plugins-base/dev.nefinita.source.gst-plugins-base/1.28.7/ed6e5410f496d171818763af2265e7977154bc7f9b827e98acf8c5bed21dd5a7/gst-plugins-base-1.28.7.tar.xz"
+    },
+    {
+      "id": "gst-plugins-good",
+      "version": "1.28.7",
+      "archive": "gst-plugins-good-1.28.7.tar.xz",
+      "originURL": "https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.28.7.tar.xz",
+      "sha256": "87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b",
+      "byteCount": 6007828,
+      "objectKey": "components/source/gst-plugins-good/dev.nefinita.source.gst-plugins-good/1.28.7/87256969c82cf3bc8574301f3e7044a90de0ac500a5a27d8ba38c4dde894dd8b/gst-plugins-good-1.28.7.tar.xz"
+    },
+    {
+      "id": "gst-plugins-ugly",
+      "version": "1.28.7",
+      "archive": "gst-plugins-ugly-1.28.7.tar.xz",
+      "originURL": "https://gstreamer.freedesktop.org/src/gst-plugins-ugly/gst-plugins-ugly-1.28.7.tar.xz",
+      "sha256": "2b681170ddc22b6b283cafeed48f427c30a17056974a6a9ed137c354e0f7730c",
+      "byteCount": 245436,
+      "objectKey": "components/source/gst-plugins-ugly/dev.nefinita.source.gst-plugins-ugly/1.28.7/2b681170ddc22b6b283cafeed48f427c30a17056974a6a9ed137c354e0f7730c/gst-plugins-ugly-1.28.7.tar.xz"
+    },
+    {
+      "id": "libffi",
+      "version": "3.8.0",
+      "archive": "libffi-3.8.0.tar.gz",
+      "originURL": "https://github.com/libffi/libffi/releases/download/v3.8.0/libffi-3.8.0.tar.gz",
+      "sha256": "7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4",
+      "byteCount": 1581626,
+      "objectKey": "components/source/libffi/dev.nefinita.source.libffi/3.8.0/7da3e2d9a171eb0a038f592ecad3ff2bb2550f3496d87b3b29ad0cf4430c0db4/libffi-3.8.0.tar.gz"
+    },
+    {
+      "id": "libjpeg-turbo",
+      "version": "3.2.0",
+      "archive": "libjpeg-turbo-3.2.0.tar.gz",
+      "originURL": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz",
+      "sha256": "6f30092cef9fb839779646608f4ee14ae3cbac989c47fa05e841b0841f09878e",
+      "byteCount": 2537858,
+      "objectKey": "components/source/libjpeg-turbo/dev.nefinita.source.libjpeg-turbo/3.2.0/6f30092cef9fb839779646608f4ee14ae3cbac989c47fa05e841b0841f09878e/libjpeg-turbo-3.2.0.tar.gz"
+    },
+    {
+      "id": "libogg",
+      "version": "1.3.6",
+      "archive": "libogg-1.3.6.tar.gz",
+      "originURL": "https://downloads.xiph.org/releases/ogg/libogg-1.3.6.tar.gz",
+      "sha256": "83e6704730683d004d20e21b8f7f55dcb3383cdf84c0daedf30bde175f774638",
+      "byteCount": 604469,
+      "objectKey": "components/source/libogg/dev.nefinita.source.libogg/1.3.6/83e6704730683d004d20e21b8f7f55dcb3383cdf84c0daedf30bde175f774638/libogg-1.3.6.tar.gz"
+    },
+    {
+      "id": "libpng",
+      "version": "1.6.58",
+      "archive": "libpng-1.6.58.tar.xz",
+      "originURL": "https://download.sourceforge.net/libpng/libpng-1.6.58.tar.xz",
+      "sha256": "28eb403f51f0f7405249132cecfe82ea5c0ef97f1b32c5a65828814ae0d34775",
+      "byteCount": 1070096,
+      "objectKey": "components/source/libpng/dev.nefinita.source.libpng/1.6.58/28eb403f51f0f7405249132cecfe82ea5c0ef97f1b32c5a65828814ae0d34775/libpng-1.6.58.tar.xz"
+    },
+    {
+      "id": "libtasn1",
+      "version": "4.21.0",
+      "archive": "libtasn1-4.21.0.tar.gz",
+      "originURL": "https://ftp.gnu.org/gnu/libtasn1/libtasn1-4.21.0.tar.gz",
+      "sha256": "1d8a444a223cc5464240777346e125de51d8e6abf0b8bac742ac84609167dc87",
+      "byteCount": 1816537,
+      "objectKey": "components/source/libtasn1/dev.nefinita.source.libtasn1/4.21.0/1d8a444a223cc5464240777346e125de51d8e6abf0b8bac742ac84609167dc87/libtasn1-4.21.0.tar.gz"
+    },
+    {
+      "id": "libvorbis",
+      "version": "1.3.7",
+      "archive": "libvorbis-1.3.7.tar.xz",
+      "originURL": "https://downloads.xiph.org/releases/vorbis/libvorbis-1.3.7.tar.xz",
+      "sha256": "b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b",
+      "byteCount": 1203792,
+      "objectKey": "components/source/libvorbis/dev.nefinita.source.libvorbis/1.3.7/b33cc4934322bcbf6efcbacf49e3ca01aadbea4114ec9589d1b1e9d20f72954b/libvorbis-1.3.7.tar.xz"
+    },
+    {
+      "id": "nasm",
+      "version": "3.02",
+      "archive": "nasm-3.02-macosx.zip",
+      "originURL": "https://www.nasm.us/pub/nasm/releasebuilds/3.02/macosx/nasm-3.02-macosx.zip",
+      "sha256": "4c1bbb09853f5f5ffc9b7832cbc9366c4761bc79ce7ffb148b0e427e5f3fa114",
+      "byteCount": 1831782,
+      "objectKey": "components/source/nasm/dev.nefinita.source.nasm/3.02/4c1bbb09853f5f5ffc9b7832cbc9366c4761bc79ce7ffb148b0e427e5f3fa114/nasm-3.02-macosx.zip"
+    },
+    {
+      "id": "nettle",
+      "version": "3.10.2",
+      "archive": "nettle-3.10.2.tar.gz",
+      "originURL": "https://ftp.gnu.org/gnu/nettle/nettle-3.10.2.tar.gz",
+      "sha256": "fe9ff51cb1f2abb5e65a6b8c10a92da0ab5ab6eaf26e7fc2b675c45f1fb519b5",
+      "byteCount": 2644644,
+      "objectKey": "components/source/nettle/dev.nefinita.source.nettle/3.10.2/fe9ff51cb1f2abb5e65a6b8c10a92da0ab5ab6eaf26e7fc2b675c45f1fb519b5/nettle-3.10.2.tar.gz"
+    },
+    {
+      "id": "orc",
+      "version": "0.4.44",
+      "archive": "orc-0.4.44.tar.xz",
+      "originURL": "https://gstreamer.freedesktop.org/src/orc/orc-0.4.44.tar.xz",
+      "sha256": "4aeb97aea2b58224029dc2b23d7d064cfa990cb4fb8c4da440bcbe9c95bc5d2d",
+      "byteCount": 317600,
+      "objectKey": "components/source/orc/dev.nefinita.source.orc/0.4.44/4aeb97aea2b58224029dc2b23d7d064cfa990cb4fb8c4da440bcbe9c95bc5d2d/orc-0.4.44.tar.xz"
+    },
+    {
+      "id": "pcre2",
+      "version": "10.48",
+      "archive": "pcre2-10.48.tar.gz",
+      "originURL": "https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.gz",
+      "sha256": "ebcc25aadf2a51fa1fefa9b8bc9e7a79b3dae86870a0f1152a22e42befd46888",
+      "byteCount": 2887260,
+      "objectKey": "components/source/pcre2/dev.nefinita.source.pcre2/10.48/ebcc25aadf2a51fa1fefa9b8bc9e7a79b3dae86870a0f1152a22e42befd46888/pcre2-10.48.tar.gz"
+    },
+    {
+      "id": "finewine",
+      "version": "e5d4ccad235eefe32d912733e57e4c0bb53a5b58",
+      "archive": "finewine-e5d4ccad235eefe32d912733e57e4c0bb53a5b58.tar.gz",
+      "originURL": "https://codeload.github.com/stoicswe/Endfield_FineWine/tar.gz/e5d4ccad235eefe32d912733e57e4c0bb53a5b58",
+      "sha256": "29ccf2d49d7efffc8df84650a93fd4817be347ee29ff5d2ff636ddd8fe8dfcf4",
+      "byteCount": 828644,
+      "objectKey": "components/source/finewine/dev.nefinita.source.finewine/e5d4ccad235eefe32d912733e57e4c0bb53a5b58/29ccf2d49d7efffc8df84650a93fd4817be347ee29ff5d2ff636ddd8fe8dfcf4/finewine-e5d4ccad235eefe32d912733e57e4c0bb53a5b58.tar.gz"
+    }
+  ]
+}

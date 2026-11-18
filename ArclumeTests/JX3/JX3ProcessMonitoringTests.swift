@@ -3,6 +3,7 @@
 //  ArclumeTests
 //
 
+import Foundation
 import Testing
 
 @testable import Arclume
@@ -69,6 +70,8 @@ struct JX3ProcessMonitoringTests {
             openFiles: """
             p808
             n/Users/example/OtherBottle/drive_c/SeasunGame/Game/JX3/bin/zhcn_hd/JX3ClientX64.exe
+            p809
+            n/Users/example/GamesOther/drive_c/SeasunGame/Game/JX3/bin/zhcn_hd/JX3ClientX64.exe
             """,
             rootProcessIdentifier: 808,
             rootProcessIsRunning: true,
@@ -78,6 +81,39 @@ struct JX3ProcessMonitoringTests {
 
         #expect(activity.gameProcessIdentifiers.isEmpty)
         #expect(activity.state == .launching)
+    }
+
+    @Test @MainActor func directLaunchReusesOnlyTheClientInTheSelectedBottle() {
+        let bottle = URL(fileURLWithPath: "/fixture/Games", isDirectory: true)
+        let anotherBottle = URL(fileURLWithPath: "/fixture/GamesOther", isDirectory: true)
+        func session(_ pid: Int32, executable: String, in bottle: URL) -> OnlineGameLaunchSession {
+            OnlineGameLaunchSession(
+                processIdentifier: pid,
+                executableName: executable,
+                logURL: nil,
+                bottleURL: bottle,
+                runtime: .bundledWine,
+                crossOverAppPath: nil,
+                closeLauncherWhenGameStarts: false
+            )
+        }
+
+        let launcher = session(100, executable: "SeasunGame.exe", in: bottle)
+        let otherClient = session(101, executable: "JX3ClientX64.exe", in: anotherBottle)
+        let client = session(102, executable: "jx3clientx64.exe", in: bottle)
+
+        #expect(OnlineGameLauncher.reusableJX3LaunchSession(
+            from: [otherClient, launcher], in: bottle, requiresClient: false
+        )?.processIdentifier == 100)
+        #expect(OnlineGameLauncher.reusableJX3LaunchSession(
+            from: [launcher, otherClient], in: bottle, requiresClient: true
+        ) == nil)
+        #expect(OnlineGameLauncher.reusableJX3LaunchSession(
+            from: [launcher, otherClient, client], in: bottle, requiresClient: true
+        )?.processIdentifier == 102)
+        #expect(OnlineGameLauncher.reusableJX3LaunchSession(
+            from: [launcher, otherClient, client], in: bottle, requiresClient: false
+        )?.processIdentifier == 102)
     }
 
     @Test @MainActor func closeLauncherPreferenceRoundTripsWithGameOptions() {

@@ -100,6 +100,12 @@ jobs:
             tag="$requested_tag"
           fi
 
+          remote_tag_sha=$(git ls-remote origin "refs/tags/$tag" "refs/tags/$tag^{}" | awk 'END { print sha } { sha = $1 }')
+          if [ -n "$remote_tag_sha" ] && [ "$remote_tag_sha" != "$GITHUB_SHA" ]; then
+            echo "GitHub 上已有指向其他提交的 $tag，无法发布当前构建。" >&2
+            exit 1
+          fi
+
           runtime_manifest="Arclume/Resources/OnlineGameDependencies/arclume-wine-runtime.json"
           runtime_version=$(plutil -extract version raw "$runtime_manifest")
           test -n "$runtime_version"
@@ -146,6 +152,15 @@ jobs:
           security list-keychain -d user -s "$keychain" login.keychain-db
           security find-identity -v -p codesigning "$keychain"
           echo "ARCLUME_SIGNING_KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+
+      - name: 构建 Metal 着色器优化工具
+        env:
+          ARCLUME_METAL_TOOLS_SIGNING_IDENTITY: ${{ steps.signing.outputs.identity }}
+        run: |
+          set -euo pipefail
+          if ! command -v x86_64-w64-mingw32-g++ >/dev/null; then brew install mingw-w64; fi
+          if ! brew list --versions zstd >/dev/null; then brew install zstd; fi
+          bash script/build_game_metal_shader_tools.sh
 
       - name: 构建签名 Archive
         if: steps.signing.outputs.enabled == 'true'
@@ -214,11 +229,18 @@ jobs:
             downloadable-resources.json \
             THIRD-PARTY-NOTICES.txt \
             jx3-gpu-profiles.json \
-            jx3-normal-config.ini; do
+            jx3-normal-config.ini \
+            GameMetalShaderTools/game-dxbc-compile.exe \
+            GameMetalShaderTools/DXMT-LICENSE.txt \
+            GameMetalShaderTools/Zstandard-LICENSE.txt; do
             test -f "$resources_path/$required_resource" || {
               echo "发布 App 缺少保留的资源文件：$required_resource" >&2
               exit 1
             }
+          done
+          for shader_tool in game-metal-shader-cache jx3-shader-scan; do
+            test -x "$resources_path/GameMetalShaderTools/$shader_tool"
+            codesign --verify --strict "$resources_path/GameMetalShaderTools/$shader_tool"
           done
 
           unexpected_payloads=$(find "$full_app_path/Contents" \
@@ -267,7 +289,11 @@ jobs:
           fi
 
           checksum_path="$dmg_path.sha256"
-          shasum -a 256 "$dmg_path" > "$checksum_path"
+          (
+            cd "$artifact_dir"
+            shasum -a 256 "$(basename "$dmg_path")" > "$checksum_path"
+            shasum -a 256 -c "$(basename "$checksum_path")"
+          )
 
           {
             echo "artifact_dir=$artifact_dir"
@@ -345,12 +371,21 @@ jobs:
             notes="$(cat "$release_summary")"$'\n\n'"$notes"
           fi
 
+          remote_tag_sha=$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}" | awk 'END { print sha } { sha = $1 }')
+          if [ -n "$remote_tag_sha" ] && [ "$remote_tag_sha" != "$GITHUB_SHA" ]; then
+            echo "GitHub 上已有指向其他提交的 $TAG，无法发布当前构建。" >&2
+            exit 1
+          fi
+
+          notes_file="$RUNNER_TEMP/arclume-release-notes.md"
+          printf '%s\n' "$notes" > "$notes_file"
           if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release create "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "$RELEASE_NAME" \
-              --notes "$notes"
+              --notes-file "$notes_file" \
+              --draft
           fi
 
           gh release upload "$TAG" \
@@ -358,10 +393,24 @@ jobs:
             "$CHECKSUM_PATH" \
             --repo "$GITHUB_REPOSITORY" \
             --clobber
+
+          assets=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets)
+          for path in "$DMG_PATH" "$CHECKSUM_PATH"; do
+            name=$(basename "$path")
+            sha256=$(shasum -a 256 "$path" | awk '{print $1}')
+            size=$(stat -f %z "$path")
+            if ! jq -e --arg name "$name" --arg digest "sha256:$sha256" --argjson size "$size" \
+              'any(.assets[]; .name == $name and .state == "uploaded" and .digest == $digest and .size == $size)' \
+              <<< "$assets" >/dev/null; then
+              echo "GitHub Release 资产校验失败：$name" >&2
+              exit 1
+            fi
+          done
           gh release edit "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$RELEASE_NAME" \
-            --notes "$notes" \
+            --notes-file "$notes_file" \
+            --draft=false \
             --prerelease=false \
             --latest
 

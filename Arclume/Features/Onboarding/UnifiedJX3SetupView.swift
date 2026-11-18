@@ -15,7 +15,7 @@ struct UnifiedJX3SetupView: View {
         Modal("配置剑网3启动器", showModal: Binding(get: { true }, set: { if !$0 { dismiss() } }),
               scrollable: false, allowsClose: !busy) {
         VStack(alignment: .leading, spacing: 22) {
-            Text(installed ? "已找到剑网3启动器，可以直接在游戏库中打开。" : "使用官网下载的 Windows 安装包，将启动器安装到 ALBottles。")
+            Text(installed ? "已找到剑网3启动器，可以直接在游戏库中打开。" : "导入 SeasunGame 文件夹、SeasunGame.exe 或 ZIP。")
                 .foregroundStyle(.secondary)
             if busy {
                 ProgressView(resourceStore.isBusy
@@ -35,7 +35,7 @@ struct UnifiedJX3SetupView: View {
                         .buttonStyle(.glassProminent)
                         .disabled(busy)
                 } else if ready {
-                    Button("选择安装包…") { showInstaller = true }.buttonStyle(.glassProminent)
+                    Button("导入启动器…") { showInstaller = true }.buttonStyle(.glassProminent)
                 } else {
                     Button("准备运行环境") { prepare() }
                         .buttonStyle(.glassProminent)
@@ -48,7 +48,7 @@ struct UnifiedJX3SetupView: View {
         .interactiveDismissDisabled(busy)
         .task { await detect() }
         .sheet(isPresented: $showInstaller, onDismiss: { Task { await detect() } }) {
-            WindowsInstallerView(title: "配置剑网3启动器")
+            JX3LauncherImportView(prefix: BundledWineRuntime.prefixURL) { showInstaller = false }
         }
     }
 
@@ -71,8 +71,9 @@ struct UnifiedJX3SetupView: View {
             defer { busy = false }
             do {
                 try await resourceStore.download(purpose: .jx3)
+                let graphicsBackend = resourceStore.graphicsBackend(for: .jx3)
                 let prefix = try await Task.detached(priority: .userInitiated) {
-                    try BundledWineRuntime.preparePrefix()
+                    try BundledWineRuntime.preparePrefix(progress: nil, graphicsBackend: graphicsBackend)
                 }.value
                 try OnlineGameBottleConfiguration.apply(to: prefix)
                 OnlineGameRuntimeKind.activate(.bundledWine, with: prefix, appGlobals: appGlobals)

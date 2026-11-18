@@ -758,7 +758,7 @@ struct GameThumbnail: View {
                         return
                     }
                     let steamExePath = appGlobals.windowsSteamFolder?.appendingPathComponent("Steam.exe").path(percentEncoded: false) ?? "C:\\Program Files (x86)\\Steam\\Steam.exe"
-                    try await launchWindowsGame(id: String(item.steamAppID), cxAppPath: item.installedCrossOverPath ?? appGlobals.cxAppPath, selectedBottle: item.installedBottleURL?.absoluteString ?? appGlobals.selectedBottle, steamExePath: steamExePath, options: gameOptions, appExeURL: item.appExeURL, installedRuntimeKind: item.installedRuntimeKind)
+                    try await launchWindowsGame(id: String(item.steamAppID), cxAppPath: item.installedCrossOverPath ?? appGlobals.cxAppPath, selectedBottle: item.installedBottleURL?.absoluteString ?? appGlobals.selectedBottle, steamExePath: steamExePath, options: gameOptions, appExeURL: item.appExeURL, installedRuntimeKind: item.installedRuntimeKind, shaderGameID: item.id)
                 }
             } catch {
                 console.error(String(reflecting: error))

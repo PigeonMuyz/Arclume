@@ -40,6 +40,16 @@
     "%@" : {
 
     },
+    "About %@ remaining in this stage" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前阶段预计剩余 %@"
+          }
+        }
+      }
+    },
     "Artwork" : {
       "localizations" : {
         "zh-Hans" : {
@@ -176,6 +186,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "更新关联前请先预览新的 Steam App ID。"
+          }
+        }
+      }
+    },
+    "Processing threads" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "处理线程数"
           }
         }
       }
@@ -870,12 +890,12 @@
         }
       }
     },
-    "GPTK 4 (Beta 2)" : {
+    "GPTK 4 (Beta 3)" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "GPTK 4（Beta 2）"
+            "value" : "GPTK 4（Beta 3）"
           }
         }
       }

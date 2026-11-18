@@ -28,7 +28,7 @@ if ps -axo comm= | /usr/bin/grep -Ei '(wine(server|device)?|[^/]+\.exe)$' >/dev/
     echo 'Please exit Windows programs before this probe; nothing was stopped.'; exit 3
 fi
 probe_version="$(tr -d '\r\n' < "$probe_graphics_version_source")"
-case "$probe_version" in d3dmetal3) probe_number=3;; d3dmetal4) probe_number=4;; *) exit 4;; esac
+case "$probe_version" in d3dmetal4) probe_number=4;; *) exit 4;; esac
 probe_archive="$probe_root/DerivedData/Build/Products/Debug/Arclume.app/Contents/Resources/d3dMetal$probe_number.tar.xz"
 probe_key="$(stat -f '%z-%m' "$probe_archive")"
 probe_graphics="$HOME/Library/Caches/Procyon/BundledOnlineGameResources/d3dMetal$probe_number-$probe_key/d3dMetal$probe_number"

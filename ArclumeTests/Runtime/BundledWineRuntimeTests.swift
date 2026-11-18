@@ -296,7 +296,31 @@ struct BundledWineRuntimeTests {
         #expect(environment["CX_ACTIVE_GRAPHICS_BACKEND"] == "d3dmetal")
         #expect(environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] == graphicsRoot
             .appendingPathComponent("external/libd3dshared.dylib").path)
-        #expect(environment["D3DM_MTL4"] == "1")
+        let metal4Enabled = ProcessInfo.processInfo.isOperatingSystemAtLeast(
+            OperatingSystemVersion(majorVersion: 27, minorVersion: 0, patchVersion: 0)
+        )
+        #expect(environment["D3DM_MTL4"] == (metal4Enabled ? "1" : "0"))
+    }
+
+    @Test(arguments: ["4.0b2", "4.0b3", "3.0"])
+    func d3dMetalRejectsStaleFrameworksBeforeInstallingModules(_ version: String) throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let resources = root.appendingPathComponent("external/D3DMetal.framework/Resources")
+        try FileManager.default.createDirectory(at: resources, withIntermediateDirectories: true)
+        let info = try PropertyListSerialization.data(
+            fromPropertyList: ["CFBundleShortVersionString": version, "CFBundleVersion": version],
+            format: .xml, options: 0
+        )
+        try info.write(to: resources.appendingPathComponent("Info.plist"))
+
+        if version == "4.0b3" {
+            try BundledOnlineGameResources.validateD3DMetalVersion(at: root)
+        } else {
+            #expect(throws: BundledOnlineGameResourceError.self) {
+                try BundledOnlineGameResources.validateD3DMetalVersion(at: root)
+            }
+        }
     }
 
     @Test func dxvkKeepsWineBuiltinsAheadOfD3DMetalModules() {
@@ -321,5 +345,165 @@ struct BundledWineRuntimeTests {
         #expect(environment["DYLD_FALLBACK_LIBRARY_PATH"] == runtime.appendingPathComponent("lib64").path)
         #expect(environment["CX_GRAPHICS_BACKEND"] == "dxvk")
         #expect(environment["CX_ACTIVE_GRAPHICS_BACKEND"] == "dxvk")
+    }
+
+    @Test func d3dMetalInstallationRepairsSeparateCopiesOfTheSharedLibrary() throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.resolvingSymlinksInPath()
+            .appendingPathComponent("D3DMetalInstall-\(UUID().uuidString)")
+        defer { try? files.removeItem(at: root) }
+        let graphics = root.appendingPathComponent("graphics")
+        let runtime = root.appendingPathComponent("runtime")
+        let shared = graphics.appendingPathComponent("external/libd3dshared.dylib")
+        try files.createDirectory(at: shared.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let sharedBytes = Data("shared library".utf8)
+        try sharedBytes.write(to: shared)
+        let moduleNames = ["d3d11", "d3d12", "d3d12core", "dxgi"]
+        for directory in ["x86_64-windows", "x86_64-unix"] {
+            try files.createDirectory(
+                at: graphics.appendingPathComponent("wine/\(directory)"), withIntermediateDirectories: true
+            )
+            try files.createDirectory(
+                at: runtime.appendingPathComponent("lib/wine/\(directory)"), withIntermediateDirectories: true
+            )
+        }
+        for name in moduleNames {
+            let dll = graphics.appendingPathComponent("wine/x86_64-windows/\(name).dll")
+            try Data(name.utf8).write(to: dll)
+            try files.copyItem(
+                at: dll, to: runtime.appendingPathComponent("lib/wine/x86_64-windows/\(name).dll")
+            )
+            try files.createSymbolicLink(
+                at: graphics.appendingPathComponent("wine/x86_64-unix/\(name).so"),
+                withDestinationURL: shared
+            )
+            try sharedBytes.write(to: runtime.appendingPathComponent("lib/wine/x86_64-unix/\(name).so"))
+        }
+        try "d3dmetal4\n".write(
+            to: runtime.appendingPathComponent(".arclume-d3dmetal-version"),
+            atomically: true, encoding: .utf8
+        )
+
+        for _ in 0..<2 {
+            try BundledWineRuntime.installD3DMetalModules(
+                from: graphics.appendingPathComponent("wine"), into: runtime, version: "4"
+            )
+            for name in moduleNames {
+                let module = runtime.appendingPathComponent("lib/wine/x86_64-unix/\(name).so")
+                #expect(try files.attributesOfItem(atPath: module.path)[.type] as? FileAttributeType == .typeSymbolicLink)
+                #expect(module.resolvingSymlinksInPath() == shared)
+            }
+        }
+    }
+
+    @Test func dxmtSwitchRestoresOriginalModulesAndKeepsD3DMetalSharedLinks() throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.resolvingSymlinksInPath()
+            .appendingPathComponent("GraphicsSwitch-\(UUID().uuidString)")
+        defer { try? files.removeItem(at: root) }
+        let runtime = root.appendingPathComponent("runtime")
+        let dxmt = root.appendingPathComponent("v0.80")
+        let gptk = root.appendingPathComponent("gptk")
+        func write(_ text: String, _ url: URL) throws {
+            try files.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: url)
+        }
+        for directory in ["x86_64-windows", "x86_64-unix", "i386-windows"] {
+            try files.createDirectory(at: runtime.appendingPathComponent("lib/wine/\(directory)"), withIntermediateDirectories: true)
+        }
+        for directory in ["x86_64-windows", "i386-windows"] {
+            for name in ["d3d11", "dxgi", "d3d10core", "winemetal"] {
+                try write("dxmt-\(name)", dxmt.appendingPathComponent("\(directory)/\(name).dll"))
+            }
+            try write("original", runtime.appendingPathComponent("lib/wine/\(directory)/d3d10core.dll"))
+        }
+        try write("dxmt-unix", dxmt.appendingPathComponent("x86_64-unix/winemetal.so"))
+        let shared = gptk.appendingPathComponent("external/libd3dshared.dylib")
+        try write("shared", shared)
+        for name in ["d3d11", "d3d12", "d3d12core", "dxgi"] {
+            try write("gptk-\(name)", gptk.appendingPathComponent("wine/x86_64-windows/\(name).dll"))
+            let unix = gptk.appendingPathComponent("wine/x86_64-unix/\(name).so")
+            try files.createDirectory(at: unix.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try files.createSymbolicLink(at: unix, withDestinationURL: shared)
+        }
+        for _ in 0..<2 {
+            try BundledWineRuntime.installD3DMetalModules(from: gptk.appendingPathComponent("wine"), into: runtime, version: "4")
+            try BundledWineRuntime.installDXMTModules(from: dxmt, into: runtime)
+            #expect(try String(contentsOf: runtime.appendingPathComponent("lib/wine/x86_64-windows/d3d11.dll"), encoding: .utf8) == "dxmt-d3d11")
+            #expect(!files.fileExists(atPath: runtime.appendingPathComponent("lib/wine/x86_64-unix/d3d11.so").path))
+            try BundledWineRuntime.installD3DMetalModules(from: gptk.appendingPathComponent("wine"), into: runtime, version: "4")
+            #expect(try String(contentsOf: runtime.appendingPathComponent("lib/wine/x86_64-windows/d3d10core.dll"), encoding: .utf8) == "original")
+            #expect(!files.fileExists(atPath: runtime.appendingPathComponent("lib/wine/x86_64-unix/winemetal.so").path))
+            #expect(runtime.appendingPathComponent("lib/wine/x86_64-unix/d3d11.so").resolvingSymlinksInPath() == shared)
+        }
+        try files.removeItem(at: dxmt.appendingPathComponent("x86_64-unix/winemetal.so"))
+        #expect(throws: BundledOnlineGameResourceError.self) {
+            try BundledWineRuntime.installDXMTModules(from: dxmt, into: runtime)
+        }
+        #expect(runtime.appendingPathComponent("lib/wine/x86_64-unix/d3d11.so").resolvingSymlinksInPath() == shared)
+    }
+
+    @Test func dxmtLaunchConfigurationUsesItsArchiveWithoutGPTKResources() throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.resolvingSymlinksInPath()
+            .appendingPathComponent("DXMTLaunch-\(UUID().uuidString)")
+        defer { try? files.removeItem(at: root) }
+        let runtime = root.appendingPathComponent("runtime")
+        let graphics = root.appendingPathComponent("v0.80")
+        let runtimeFiles = ["lib/wine/x86_64-unix/wine", "lib/wine/x86_64-unix/ntdll.so",
+            "bin/wineserver", "share/wine/wine.inf", "dxvk/x64/dxgi.dll"]
+        for name in runtimeFiles {
+            let file = runtime.appendingPathComponent(name)
+            try files.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(name.utf8).write(to: file)
+            try files.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
+        }
+        try BundledWineRuntime.manifest.version.write(
+            to: runtime.appendingPathComponent(BundledWineRuntime.versionMarkerFileName), atomically: true, encoding: .utf8
+        )
+        for directory in ["x86_64-windows", "i386-windows"] {
+            try files.createDirectory(at: runtime.appendingPathComponent("lib/wine/\(directory)"), withIntermediateDirectories: true)
+            try files.createDirectory(at: graphics.appendingPathComponent(directory), withIntermediateDirectories: true)
+            for name in ["d3d11", "dxgi", "d3d10core", "winemetal"] {
+                try Data(name.utf8).write(to: graphics.appendingPathComponent("\(directory)/\(name).dll"))
+            }
+        }
+        try files.createDirectory(at: graphics.appendingPathComponent("x86_64-unix"), withIntermediateDirectories: true)
+        try Data("unix".utf8).write(to: graphics.appendingPathComponent("x86_64-unix/winemetal.so"))
+        let configuration = try BundledWineRuntime.makeLaunchConfiguration(
+            runtimeURL: runtime, graphicsBackend: "dxmt", d3dMetal4Enabled: false,
+            mtlHudEnabled: false, wineMSync: true, graphicsRoot: graphics
+        )
+        #expect(configuration.environment["CX_ACTIVE_GRAPHICS_BACKEND"] == "dxmt")
+        #expect(configuration.environment["PROCYON_DLL_PATH"] == graphics.path)
+        #expect(configuration.environment["CX_APPLEGPTK_LIBD3DSHARED_PATH"] == "")
+        #expect(configuration.environment["D3DMETAL_FRAMEWORK_PATH"] == "")
+        #expect(configuration.environment["D3DM_MTL4"] == "0")
+        #expect(configuration.environment["MTL_HUD_ENABLED"] == "0")
+        #expect(configuration.environment["__CX_UNIX_MTL_HUD_ENABLED"] == "0")
+
+        let withHUD = try BundledWineRuntime.makeLaunchConfiguration(
+            runtimeURL: runtime, graphicsBackend: "dxmt", d3dMetal4Enabled: false,
+            mtlHudEnabled: true, wineMSync: true, graphicsRoot: graphics
+        )
+        #expect(withHUD.environment["MTL_HUD_ENABLED"] == "1")
+        #expect(withHUD.environment["__CX_UNIX_MTL_HUD_ENABLED"] == "1")
+    }
+
+    @Test func graphicsSwitchIgnoresIdleServicesAndDetectsLoadedD3DModules() {
+        let mappings = """
+        p41
+        n/tmp/runtime/bin/wineserver
+        p42
+        n/tmp/runtime/lib/wine/x86_64-unix/ntdll.so
+        n/tmp/wine-keepalive.exe
+        p43
+        n/tmp/runtime/lib/wine/x86_64-unix/winemac.so
+        p44
+        n/tmp/prefix/drive_c/windows/system32/D3D11.dll
+        p45
+        n/tmp/runtime/lib/wine/x86_64-unix/winemetal.so
+        """
+        #expect(BundledWineRuntime.graphicsModulePIDs(mappings) == Set([44, 45]))
     }
 }

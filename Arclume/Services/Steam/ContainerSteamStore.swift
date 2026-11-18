@@ -11,12 +11,16 @@ final class ContainerSteamStore: ObservableObject {
     @Published private(set) var detection: ContainerSteamDetection?
     @Published private(set) var snapshots: [Int: SteamInstallSnapshot] = [:]
     @Published var errorMessage: String?
-    @Published private(set) var steamSetupBusy = false
+    @Published private(set) var steamSetupBusy = false {
+        didSet { ArclumeResetCoordinator.setActivity(self, busy: steamSetupBusy || steamOpening) }
+    }
     @Published private(set) var steamSetupDownloading = false
     @Published private(set) var steamSetupProgress: Double?
     @Published private(set) var steamSetupMessage: String?
     @Published private(set) var steamSetupError: String?
-    @Published private(set) var steamOpening = false
+    @Published private(set) var steamOpening = false {
+        didSet { ArclumeResetCoordinator.setActivity(self, busy: steamSetupBusy || steamOpening) }
+    }
     private var steamSetupTask: Task<Void, Never>?
     private var steamInstallerProcess: Process?
     private var steamOpenTask: Task<Void, Never>?

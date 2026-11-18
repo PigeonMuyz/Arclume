@@ -7,7 +7,6 @@
 
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 struct GameOptionsView: View {
     @Binding var game: Game?
@@ -15,9 +14,8 @@ struct GameOptionsView: View {
     @EnvironmentObject private var appGlobals: AppGlobals
     @State private var isAutoConfiguring = false
     @State private var autoConfigErrorMessage: String?
-    @State private var isApplyingJX3Preset = false
-    @State private var jx3PresetMessage: String?
-    @State private var jx3PresetErrorMessage: String?
+    @State private var isSettingsVisible = false
+    @State private var isAdvancedLaunchUnlocked = false
 
     private var isJX3Game: Bool {
         guard let game else { return false }
@@ -31,11 +29,43 @@ struct GameOptionsView: View {
             : String(describing: game.id)
     }
 
-    private var gameOptionsKey: String {
-        namespacedKey(
-            "GameOptions",
-            OnlineGameMode.gameOptionsIdentifier(for: game!)
+    private var gameOptionsKey: String? {
+        game.map { namespacedKey("GameOptions", OnlineGameMode.gameOptionsIdentifier(for: $0)) }
+    }
+
+    private func savedOption<Value>(
+        _ option: ReferenceWritableKeyPath<GameOptions, Value>,
+        _ stored: WritableKeyPath<GameOptionsData, Value?>,
+        updateRelated: ((Value, inout GameOptionsData) -> Void)? = nil
+    ) -> Binding<Value> {
+        let key = gameOptionsKey
+        return Binding(
+            get: { gameOptions[keyPath: option] },
+            set: { value in
+                guard let key, key == gameOptionsKey else { return }
+                gameOptions[keyPath: option] = value
+                GameOptionsPersistence.update(key: key) { saved in
+                    saved[keyPath: stored] = value
+                    updateRelated?(value, &saved)
+                }
+            }
         )
+    }
+
+    private var graphicsBackend: Binding<String> {
+        savedOption(\.cxGraphicsBackend, \.cxGraphicsBackend) { backend, saved in
+            let enabled = backend == "d3dmetal4"
+            gameOptions.d3dMtl4Enabled = enabled
+            saved.d3dMtl4Enabled = enabled
+        }
+    }
+
+    private var metalFX: Binding<Bool> {
+        savedOption(\.dxmtMetalFXSpatial, \.dxmtMetalFXSpatial) { enabled, saved in
+            guard !enabled else { return }
+            gameOptions.dxmtMetalSpatialUpscaleFactor = 1.0
+            saved.dxmtMetalSpatialUpscaleFactor = 1.0
+        }
     }
 
     var preferredMaxFrameRate: String {
@@ -60,14 +90,37 @@ struct GameOptionsView: View {
                 GameContainerAssignmentView(game: game).padding(.vertical, 10)
             }
 
-            if isJX3Game {
-                onlineOptionsForm
-            } else {
-                standardOptionsForm
+            if game != nil {
+                if isJX3Game {
+                    onlineOptionsForm
+                } else {
+                    standardOptionsForm
+                }
             }
         }
         .padding()
-        .onAppear(perform: loadOptions)
+        .background {
+            JX3AdvancedLaunchUnlockMonitor(
+                isActive: isSettingsVisible && isJX3Game && !isAdvancedLaunchUnlocked
+            ) {
+                isAdvancedLaunchUnlocked = true
+            }
+            .id(game?.id)
+        }
+        .onAppear {
+            isSettingsVisible = true
+            isAdvancedLaunchUnlocked = false
+            loadOptions()
+        }
+        .onDisappear {
+            isSettingsVisible = false
+            isAdvancedLaunchUnlocked = false
+        }
+        .onChange(of: gameOptionsKey) { _, _ in
+            isAdvancedLaunchUnlocked = false
+            autoConfigErrorMessage = nil
+            loadOptions()
+        }
     }
 
     private var onlineOptionsForm: some View {
@@ -78,81 +131,48 @@ struct GameOptionsView: View {
                         VStack(alignment: .trailing, spacing: 12) {
                             DropDown(
                                 options: OnlineGameMode.onlineGraphicsBackends,
-                                label: "D3DMetal 版本",
-                                value: $gameOptions.cxGraphicsBackend
+                                label: "图形方案",
+                                value: graphicsBackend
                             )
-                            .onChange(of: gameOptions.cxGraphicsBackend) { _, backend in
-                                gameOptions.d3dMtl4Enabled = backend == "d3dmetal4"
+                            if !OnlineGameMode.supportsD3DMetal4 {
+                                Text(OnlineGameMode.d3dMetal4RequirementMessage)
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
 
                             Divider()
-                            TextField("启动参数", text: $gameOptions.gameArguments)
-                            TextField("环境变量", text: $gameOptions.envVariables)
+                            TextField("启动参数", text: savedOption(\.gameArguments, \.gameArguments))
+                            TextField("环境变量", text: savedOption(\.envVariables, \.envVariables))
                         }
 
                         Spacer()
 
                         VStack(alignment: .trailing, spacing: 12) {
-                            Toggle(L10n.string("Metal HUD"), isOn: $gameOptions.mtlHudEnabled)
-                            Toggle("MSync", isOn: $gameOptions.wineMSync)
-                            Toggle(L10n.string("DLSS Frame Generation (Beta)"), isOn: $gameOptions.dlssFrameGenerationEnabled)
+                            Toggle(L10n.string("Metal HUD"), isOn: savedOption(\.mtlHudEnabled, \.mtlHudEnabled))
+                            Toggle("MSync", isOn: savedOption(\.wineMSync, \.wineMSync))
+                            Toggle(L10n.string("DLSS Frame Generation (Beta)"),
+                                   isOn: savedOption(\.dlssFrameGenerationEnabled, \.dlssFrameGenerationEnabled))
                                 .help("向客户端声明 DLSS 与帧生成能力（DLSS=2）；关闭时仅声明 DLSS 能力（DLSS=1）。实际开关仍需在游戏画质设置中选择。")
                             Toggle(
                                 "检测到游戏本体后关闭启动器",
-                                isOn: $gameOptions.closeLauncherWhenGameStarts
+                                isOn: savedOption(\.closeLauncherWhenGameStarts, \.closeLauncherWhenGameStarts)
                             )
                             .help("检测到 JX3ClientX64.exe 后，仅关闭 SeasunGame.exe。")
                         }
                     }
                 }
 
-                jx3PresetSection
+                if isAdvancedLaunchUnlocked {
+                    Toggle("跳过启动器，直接启动游戏", isOn: savedOption(\.jx3SkipLauncher, \.jx3SkipLauncher))
+                }
 
-                optionsActions(includeAutoConfigure: false)
+                if gameOptions.cxGraphicsBackend == "dxmt", let game, let prefix = selectedBottleURL {
+                    GameShaderSourcePicker(game: game, prefix: prefix)
+                }
             }
         }
         .controlSize(.small)
         .formStyle(.columns)
         .toggleStyle(.switch)
-    }
-
-    private var jx3PresetSection: some View {
-        Section("剑网3画质预设") {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Button("导入推荐预设", systemImage: "sparkles") {
-                        importRecommendedJX3Preset()
-                    }
-                    .disabled(isApplyingJX3Preset)
-
-                    Button("从文件导入", systemImage: "square.and.arrow.down") {
-                        chooseJX3Preset()
-                    }
-                    .disabled(isApplyingJX3Preset)
-
-                    if isApplyingJX3Preset {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                }
-                .buttonStyle(.bordered)
-
-                Text("导入会替换当前 config.ini，不保留备份；不会修改 DLSS 能力声明。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-
-                if let jx3PresetMessage {
-                    Text(jx3PresetMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.arclumeBrightGray)
-                }
-                if let jx3PresetErrorMessage {
-                    Text(jx3PresetErrorMessage)
-                        .font(.footnote)
-                        .foregroundStyle(.red)
-                }
-            }
-        }
     }
 
     private var standardOptionsForm: some View {
@@ -162,31 +182,33 @@ struct GameOptionsView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         if !game!.isNative {
                             DropDown(options: OnlineGameMode.onlineGraphicsBackends,
-                                     label: "D3DMetal 版本",
-                                     value: $gameOptions.cxGraphicsBackend,
-                                     controlIdentifier: "game-options-d3dmetal-version")
-                                .onChange(of: gameOptions.cxGraphicsBackend) { _, backend in
-                                    gameOptions.d3dMtl4Enabled = backend == "d3dmetal4"
-                                }
+                                     label: "图形方案",
+                                     value: graphicsBackend,
+                                     controlIdentifier: "game-options-graphics-backend")
+                            if !OnlineGameMode.supportsD3DMetal4 {
+                                Text(OnlineGameMode.d3dMetal4RequirementMessage)
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
                             Text("适用于 Direct3D 转译；Vulkan 游戏（如终末地）仍使用 Vulkan。")
                                 .font(.caption).foregroundStyle(.secondary)
-                            Toggle("MSync", isOn: $gameOptions.wineMSync)
+                            Toggle("MSync", isOn: savedOption(\.wineMSync, \.wineMSync))
+                                .accessibilityIdentifier("game-options-msync")
                         }
-                        Toggle(L10n.string("Metal HUD"), isOn: $gameOptions.mtlHudEnabled)
+                        Toggle(L10n.string("Metal HUD"), isOn: savedOption(\.mtlHudEnabled, \.mtlHudEnabled))
                     }
                     .padding(8)
                 }
 
                 DisclosureGroup("兼容性与输入设备") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Toggle(L10n.string("Advertise AVX"), isOn: $gameOptions.advertiseAVX)
+                        Toggle(L10n.string("Advertise AVX"), isOn: savedOption(\.advertiseAVX, \.advertiseAVX))
                         if !game!.isNative {
-                            Toggle(L10n.string("Enable SDL"), isOn: $gameOptions.enableSDL)
-                            Toggle(L10n.string("Disable Hidraw"), isOn: $gameOptions.disableHidraw)
+                            Toggle(L10n.string("Enable SDL"), isOn: savedOption(\.enableSDL, \.enableSDL))
+                            Toggle(L10n.string("Disable Hidraw"), isOn: savedOption(\.disableHidraw, \.disableHidraw))
                             Divider()
                             Text(L10n.string("Vulkan options")).font(.subheadline.weight(.medium))
-                            Toggle(L10n.string("Enable UE4 Hack"), isOn: $gameOptions.ue4Hack)
-                            Toggle(L10n.string("MTL arg. buffers"), isOn: $gameOptions.mvkArgBuff)
+                            Toggle(L10n.string("Enable UE4 Hack"), isOn: savedOption(\.ue4Hack, \.ue4Hack))
+                            Toggle(L10n.string("MTL arg. buffers"), isOn: savedOption(\.mvkArgBuff, \.mvkArgBuff))
                         }
                     }
                     .padding(.top, 12)
@@ -194,8 +216,8 @@ struct GameOptionsView: View {
 
                 DisclosureGroup("自定义启动参数") {
                     VStack(spacing: 12) {
-                        TextField(L10n.string("Game arguments"), text: $gameOptions.gameArguments)
-                        TextField(L10n.string("Env variables"), text: $gameOptions.envVariables)
+                        TextField(L10n.string("Game arguments"), text: savedOption(\.gameArguments, \.gameArguments))
+                        TextField(L10n.string("Env variables"), text: savedOption(\.envVariables, \.envVariables))
                     }
                     .textFieldStyle(.roundedBorder)
                     .padding(.top, 12)
@@ -207,20 +229,15 @@ struct GameOptionsView: View {
                         VStack {
                             Text(L10n.format("Preferred maximum frame rate: %@", preferredMaxFrameRate))
                             Slider(
-                                value: $gameOptions.dxmtPreferredMaxFrameRate,
+                                value: savedOption(\.dxmtPreferredMaxFrameRate, \.dxmtPreferredMaxFrameRate),
                                 in: 19...240,
                                 step: 1.0
                             )
                             .help(L10n.string("Use a value below 20 to let the game choose the frame rate."))
                         }
 
-                        Toggle(L10n.string("MetalFX spatial upscaling"), isOn: $gameOptions.dxmtMetalFXSpatial)
+                        Toggle(L10n.string("MetalFX spatial upscaling"), isOn: metalFX)
                             .help(L10n.string("Enables MetalFX spatial upscaling when the game supports it."))
-                            .onChange(of: gameOptions.dxmtMetalFXSpatial) { _, newValue in
-                                if !newValue {
-                                    gameOptions.dxmtMetalSpatialUpscaleFactor = 1.0
-                                }
-                            }
 
                         if gameOptions.dxmtMetalFXSpatial {
                             VStack {
@@ -229,7 +246,7 @@ struct GameOptionsView: View {
                                     String(gameOptions.dxmtMetalSpatialUpscaleFactor)
                                 ))
                                 Slider(
-                                    value: $gameOptions.dxmtMetalSpatialUpscaleFactor,
+                                    value: savedOption(\.dxmtMetalSpatialUpscaleFactor, \.dxmtMetalSpatialUpscaleFactor),
                                     in: 1.0...2.0,
                                     step: 0.125
                                 )
@@ -245,7 +262,7 @@ struct GameOptionsView: View {
                         VStack {
                             Text(L10n.format("Preferred maximum frame rate: %@", d3dMaxFPS))
                             Slider(
-                                value: $gameOptions.d3dMaxFPS,
+                                value: savedOption(\.d3dMaxFPS, \.d3dMaxFPS),
                                 in: 19...240,
                                 step: 1.0
                             )
@@ -254,7 +271,12 @@ struct GameOptionsView: View {
                     }
                 }
 
-                optionsActions(includeAutoConfigure: true)
+                if (game?.steamAppID ?? 0) > 0 {
+                    autoConfigureAction
+                }
+                if gameOptions.cxGraphicsBackend == "dxmt", let game, let prefix = selectedBottleURL {
+                    GameShaderSourcePicker(game: game, prefix: prefix)
+                }
             }
         }
         .frame(width: 480)
@@ -263,40 +285,23 @@ struct GameOptionsView: View {
     }
 
     @ViewBuilder
-    private func optionsActions(includeAutoConfigure: Bool) -> some View {
-        HStack {
-            Button(L10n.string("Save settings")) {
-                console.log("saving")
-                persistUsrDefData(key: gameOptionsKey, data: GameOptionsData(data: gameOptions))
-            }
-            .buttonStyle(.borderedProminent)
-
-            Button(L10n.string("Reset")) {
-                console.log("resetting")
-                resetOptions()
-            }
-
-            Spacer()
-
-            if includeAutoConfigure, (game?.steamAppID ?? 0) > 0 {
-                ProminentButton(
-                    L10n.string("Auto configure"),
-                    systemImage: "wand.and.sparkles",
-                    isLoading: isAutoConfiguring
-                ) {
-                    Task { await autoConfigure() }
-                }
-                .disabled(isAutoConfiguring || !isConfiguredMetadataServiceAvailable)
-                .help(
-                    isConfiguredMetadataServiceAvailable
-                        ? L10n.string("Load recommended settings for this game.")
-                        : L10n.string("The configured metadata service is unavailable.")
-                )
-            }
+    private var autoConfigureAction: some View {
+        ProminentButton(
+            L10n.string("Auto configure"),
+            systemImage: "wand.and.sparkles",
+            isLoading: isAutoConfiguring
+        ) {
+            Task { await autoConfigure() }
         }
+        .disabled(isAutoConfiguring || !isConfiguredMetadataServiceAvailable)
+        .help(
+            isConfiguredMetadataServiceAvailable
+                ? L10n.string("Load recommended settings for this game.")
+                : L10n.string("The configured metadata service is unavailable.")
+        )
         .padding(.top)
 
-        if includeAutoConfigure, let autoConfigErrorMessage {
+        if let autoConfigErrorMessage {
             Text(autoConfigErrorMessage)
                 .font(.footnote)
                 .foregroundStyle(.red)
@@ -304,22 +309,9 @@ struct GameOptionsView: View {
     }
 
     private func loadOptions() {
-        if let data: GameOptionsData = readUsrDefData(key: gameOptionsKey) {
-            gameOptions.set(data: data)
-        }
+        guard let gameOptionsKey else { return }
+        gameOptions.set(data: GameOptionsPersistence.read(key: gameOptionsKey))
         if game?.isNative == false {
-            gameOptions.cxGraphicsBackend = OnlineGameMode.resolvedGraphicsBackend(
-                gameOptions.cxGraphicsBackend, supportingD3DMetal4: OnlineGameMode.supportsD3DMetal4)
-            gameOptions.d3dMtl4Enabled = gameOptions.cxGraphicsBackend == "d3dmetal4"
-        }
-        if isJX3Game {
-            OnlineGameMode.applyDefaultRuntimePreferences(to: gameOptions)
-        }
-    }
-
-    private func resetOptions() {
-        gameOptions.set(data: GameOptionsData(data: GameOptions()))
-        if isJX3Game {
             OnlineGameMode.applyDefaultRuntimePreferences(to: gameOptions)
         }
     }
@@ -330,79 +322,103 @@ struct GameOptionsView: View {
             : OnlineGameDiscovery.selectedBottleURL(from: appGlobals.selectedBottle)
     }
 
-    private func chooseJX3Preset() {
-        let panel = NSOpenPanel()
-        panel.title = "选择剑网3 config.ini 画质预设"
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.allowedContentTypes = [UTType(filenameExtension: "ini") ?? .data]
-        panel.directoryURL = FileManager.default.urls(
-            for: .downloadsDirectory,
-            in: .userDomainMask
-        ).first
-
-        guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
-        importJX3Preset(from: sourceURL)
-    }
-
-    private func importRecommendedJX3Preset() {
-        guard let sourceURL = BundledOnlineGameResources.resourceURL(
-            named: JX3ConfigPresetImporter.recommendedConfigResourceName
-        ) else {
-            jx3PresetErrorMessage = "App 内未找到内置剑网3推荐画质预设。"
-            return
-        }
-        importJX3Preset(from: sourceURL)
-    }
-
-    private func importJX3Preset(from sourceURL: URL) {
-        guard let selectedBottleURL else {
-            jx3PresetErrorMessage = "请先在设置中选择剑网3使用的 Bottle。"
-            return
-        }
-
-        isApplyingJX3Preset = true
-        jx3PresetMessage = nil
-        jx3PresetErrorMessage = nil
-        defer { isApplyingJX3Preset = false }
-
-        do {
-            _ = try JX3ConfigPresetImporter.importPreset(
-                from: sourceURL,
-                into: selectedBottleURL
-            )
-            var details = [
-                "已导入 \(sourceURL.lastPathComponent)",
-                "SkipVideoCardScoreUpdate=1"
-            ]
-
-            do {
-                if try BundledOnlineGameResources.installNVNGX(into: selectedBottleURL) {
-                    details.append("NVNGX 已使用 App 内置版本替换")
-                }
-            } catch {
-                details.append("NVNGX 将在下次启动前自动处理")
-                console.warn("导入剑网3画质预设后暂时无法替换 NVNGX：\(error.localizedDescription)")
-            }
-
-            jx3PresetMessage = details.joined(separator: "；")
-        } catch {
-            jx3PresetErrorMessage = error.localizedDescription
-        }
-    }
-
     @MainActor
     private func autoConfigure() async {
-        guard let steamAppID = game?.steamAppID, steamAppID > 0 else { return }
+        guard let game, let key = gameOptionsKey, game.steamAppID > 0, !isAutoConfiguring else { return }
         isAutoConfiguring = true
         autoConfigErrorMessage = nil
         defer { isAutoConfiguring = false }
 
         do {
-            let data = try await api.fetchAutoConfig(steamID: String(steamAppID))
-            gameOptions.importAutoConfig(data: data)
+            let data = try await api.fetchAutoConfig(steamID: String(game.steamAppID))
+            GameOptionsPersistence.update(key: key) { saved in
+                let options = GameOptions()
+                options.set(data: saved)
+                options.importAutoConfig(data: data)
+                if !game.isNative {
+                    OnlineGameMode.applyDefaultRuntimePreferences(to: options)
+                }
+                saved = GameOptionsData(data: options)
+            }
+            if isSettingsVisible, key == gameOptionsKey { loadOptions() }
         } catch {
-            autoConfigErrorMessage = error.localizedDescription
+            if isSettingsVisible, key == gameOptionsKey { autoConfigErrorMessage = error.localizedDescription }
+        }
+    }
+}
+
+nonisolated struct JX3AdvancedLaunchUnlockSequence {
+    private var recent: [String] = []
+    private static let sequences = [
+        ["↑", "↑", "↓", "↓", "←", "←", "→", "→"],
+        ["w", "w", "s", "s", "a", "a", "d", "d"]
+    ]
+
+    mutating func accept(_ key: String) -> Bool {
+        recent.append(key.lowercased())
+        if recent.count > 8 { recent.removeFirst(recent.count - 8) }
+        guard Self.sequences.contains(recent) else { return false }
+        recent.removeAll(keepingCapacity: true)
+        return true
+    }
+}
+
+private struct JX3AdvancedLaunchUnlockMonitor: NSViewRepresentable {
+    let isActive: Bool
+    let onUnlock: () -> Void
+
+    func makeNSView(context: Context) -> KeyView { KeyView() }
+
+    func updateNSView(_ view: KeyView, context: Context) {
+        view.onUnlock = onUnlock
+        view.isActive = isActive
+    }
+
+    static func dismantleNSView(_ view: KeyView, coordinator: ()) { view.stop() }
+
+    final class KeyView: NSView {
+        var onUnlock: (() -> Void)?
+        var isActive = false {
+            didSet {
+                if isActive { start() } else { stop() }
+            }
+        }
+        private var monitor: Any?
+        private var sequence = JX3AdvancedLaunchUnlockSequence()
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if window == nil { stop() } else if isActive { start() }
+        }
+
+        private func start() {
+            guard monitor == nil, window != nil else { return }
+            monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                MainActor.assumeIsolated {
+                    guard let self, self.isActive, let window = self.window,
+                          event.window === window, window.isKeyWindow,
+                          !self.isHiddenOrHasHiddenAncestor, !event.isARepeat,
+                          event.modifierFlags.intersection([.command, .control, .option]).isEmpty
+                    else { return }
+                    let key: String
+                    switch event.keyCode {
+                    case 126: key = "↑"
+                    case 125: key = "↓"
+                    case 123: key = "←"
+                    case 124: key = "→"
+                    default: key = event.charactersIgnoringModifiers ?? ""
+                    }
+                    if self.sequence.accept(key) { self.onUnlock?() }
+                }
+                // Observe without consuming text entry, arrows, or shortcuts.
+                return event
+            }
+        }
+
+        func stop() {
+            if let monitor { NSEvent.removeMonitor(monitor) }
+            monitor = nil
+            sequence = JX3AdvancedLaunchUnlockSequence()
         }
     }
 }
