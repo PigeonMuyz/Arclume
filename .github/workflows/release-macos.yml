@@ -159,7 +159,6 @@ jobs:
         run: |
           set -euo pipefail
           if ! command -v x86_64-w64-mingw32-g++ >/dev/null; then brew install mingw-w64; fi
-          if ! brew list --versions zstd >/dev/null; then brew install zstd; fi
           bash script/build_game_metal_shader_tools.sh
 
       - name: 构建签名 Archive
@@ -240,6 +239,8 @@ jobs:
           done
           for shader_tool in game-metal-shader-cache jx3-shader-scan; do
             test -x "$resources_path/GameMetalShaderTools/$shader_tool"
+            xcrun lipo "$resources_path/GameMetalShaderTools/$shader_tool" -verify_arch arm64
+            xcrun lipo "$resources_path/GameMetalShaderTools/$shader_tool" -verify_arch x86_64
             codesign --verify --strict "$resources_path/GameMetalShaderTools/$shader_tool"
           done
 
